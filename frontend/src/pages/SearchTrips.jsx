@@ -10,6 +10,7 @@ import {
 import { colors, radius, spacing, typography, surfaces, buttons, inputs, pills, shadows } from '../theme';
 import { AddressSearch, AUT_CAMPUSES } from '../components/MapComponents';
 import * as turf from '@turf/turf';
+import { filterTripsByTimeOfDay } from '../utils/timeFilters';
 
 function isSameDepartureDate(departureTime, selectedDate) {
   return Boolean(departureTime && selectedDate && departureTime.startsWith(selectedDate));
@@ -36,6 +37,7 @@ const SearchTrips = ({ onTripSelect }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [hasSearched, setHasSearched] = useState(false);
+  const [timeFilter, setTimeFilter] = useState('All');
 
   const handleSearch = async (e) => {
     e.preventDefault();
@@ -105,6 +107,8 @@ const SearchTrips = ({ onTripSelect }) => {
       setLoading(false);
     }
   };
+
+  const filteredTrips = filterTripsByTimeOfDay(trips, timeFilter);
 
   return (
     <div style={{ maxWidth: '720px', margin: '0 auto', padding: spacing.xl }}>
@@ -198,52 +202,79 @@ const SearchTrips = ({ onTripSelect }) => {
         
         {!loading && hasSearched && trips.length > 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.md }}>
-            <h3 style={{ ...typography.h2, marginBottom: spacing.sm }}>Available Rides</h3>
-            {trips.map((trip) => {
-              return (
-                <div 
-                  key={trip.id} 
-                  onClick={() => {
-                    if (onTripSelect) onTripSelect(trip);
-                  }}
-                  style={{ 
-                    ...surfaces.innerCard,
-                    padding: spacing.lg,
-                    cursor: 'pointer',
-                    transition: 'all 0.2s ease-in-out',
-                    border: surfaces.innerCard.border,
-                    backgroundColor: colors.surfaceMuted,
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.backgroundColor = colors.surfaceSolid;
-                    e.currentTarget.style.boxShadow = shadows.soft;
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.backgroundColor = colors.surfaceMuted;
-                    e.currentTarget.style.boxShadow = 'none';
-                  }}
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                    <div>
-                      <div style={{ ...typography.small, color: colors.textSubtle, marginBottom: '4px', fontWeight: 600 }}>
-                        {formatDeparture(trip.departureTime)}
-                      </div>
-                      <div style={{ ...typography.h3, marginBottom: spacing.xs }}>
-                        {trip.origin} <span style={{ color: colors.textSubtle }}>→</span> {trip.destination}
-                      </div>
-                      {trip.distanceKm !== null && (
-                        <div style={{ ...typography.small, color: colors.textSubtle, marginTop: '4px' }}>
-                          <strong>Proximity:</strong> Approx. {trip.distanceKm.toFixed(1)} km from your pickup location
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: spacing.sm, flexWrap: 'wrap', gap: spacing.sm }}>
+              <h3 style={{ ...typography.h2, margin: 0 }}>Available Rides</h3>
+              <div style={{ display: 'flex', gap: spacing.xs }}>
+                {['All', 'Morning', 'Afternoon', 'Evening'].map(f => (
+                  <button
+                    key={f}
+                    onClick={() => setTimeFilter(f)}
+                    style={{
+                      ...pills.base,
+                      backgroundColor: timeFilter === f ? colors.primary : colors.surfaceMuted,
+                      color: timeFilter === f ? 'white' : colors.text,
+                      cursor: 'pointer',
+                      border: timeFilter === f ? 'none' : surfaces.innerCard.border,
+                      fontWeight: timeFilter === f ? 600 : 400,
+                    }}
+                  >
+                    {f}
+                  </button>
+                ))}
+              </div>
+            </div>
+            
+            {filteredTrips.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: spacing.lg, color: colors.textSubtle, ...surfaces.innerCard }}>
+                No rides found for the "{timeFilter}" time filter.
+              </div>
+            ) : (
+              filteredTrips.map((trip) => {
+                return (
+                  <div 
+                    key={trip.id} 
+                    onClick={() => {
+                      if (onTripSelect) onTripSelect(trip);
+                    }}
+                    style={{ 
+                      ...surfaces.innerCard,
+                      padding: spacing.lg,
+                      cursor: 'pointer',
+                      transition: 'all 0.2s ease-in-out',
+                      border: surfaces.innerCard.border,
+                      backgroundColor: colors.surfaceMuted,
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.backgroundColor = colors.surfaceSolid;
+                      e.currentTarget.style.boxShadow = shadows.soft;
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.backgroundColor = colors.surfaceMuted;
+                      e.currentTarget.style.boxShadow = 'none';
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                      <div>
+                        <div style={{ ...typography.small, color: colors.textSubtle, marginBottom: '4px', fontWeight: 600 }}>
+                          {formatDeparture(trip.departureTime)}
                         </div>
-                      )}
-                    </div>
-                    <div style={{ ...pills.base, ...pills.accent }}>
-                      {trip.availableSeats} seat{trip.availableSeats > 1 ? 's' : ''}
+                        <div style={{ ...typography.h3, marginBottom: spacing.xs }}>
+                          {trip.origin} <span style={{ color: colors.textSubtle }}>→</span> {trip.destination}
+                        </div>
+                        {trip.distanceKm !== null && (
+                          <div style={{ ...typography.small, color: colors.textSubtle, marginTop: '4px' }}>
+                            <strong>Proximity:</strong> Approx. {trip.distanceKm.toFixed(1)} km from your pickup location
+                          </div>
+                        )}
+                      </div>
+                      <div style={{ ...pills.base, ...pills.accent }}>
+                        {trip.availableSeats} seat{trip.availableSeats > 1 ? 's' : ''}
+                      </div>
                     </div>
                   </div>
-                </div>
-              );
-            })}
+                );
+              })
+            )}
           </div>
         )}
       </div>

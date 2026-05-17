@@ -72,7 +72,8 @@ function VehicleProfile({ initialVehicle = null, onSaved, compact = false }) {
       const user = auth.currentUser;
       if (!user) return;
 
-      const vehicleData = { make, model, licensePlate };
+      const vehicleData = { make, model, licensePlate, ownerId: user.uid };
+
       await setDoc(doc(db, FIRESTORE_COLLECTIONS.vehicles, user.uid), vehicleData);
 
       setMessage('Vehicle details saved successfully.');
