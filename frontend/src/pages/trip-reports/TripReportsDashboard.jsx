@@ -128,6 +128,7 @@ function mapDoc(docSnap, trip, userMap = {}) {
       time: ev.time?.toDate?.() || (ev.time ? new Date(ev.time) : new Date()),
     })),
     adminNotes: d.adminNotes || '',
+    dashcamResponse: d.dashcamResponse || null,
   };
 }
 

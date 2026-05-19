@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
-import { doc, updateDoc, arrayUnion, serverTimestamp } from 'firebase/firestore';
+import { doc, updateDoc, arrayUnion, serverTimestamp, addDoc, setDoc, collection } from 'firebase/firestore';
 import { db, auth, firebaseReady } from '../../firebase';
+import { FIRESTORE_COLLECTIONS } from '../../firestoreModel';
 import 'leaflet/dist/leaflet.css';
 
 const C = {
@@ -71,6 +72,31 @@ function Badge({ bg, color, dot, children }) {
       {dot && <span style={{ width:7, height:7, borderRadius:'50%', background:dot }} />}
       {children}
     </span>
+  );
+}
+
+function QuickActionBtn({ icon, label, fb = {}, onClick }) {
+  const isLoading = fb.loading;
+  const isSuccess = !!fb.success;
+  const isError   = !!fb.error;
+  const bg = isSuccess ? C.greenLight : isError ? C.redLight : C.surface;
+  const color = isSuccess ? C.green : isError ? C.red : C.text;
+  return (
+    <div>
+      <button
+        onClick={onClick}
+        disabled={isLoading}
+        style={{ width:'100%', padding:'8px 12px', border:`1px solid ${isSuccess ? C.green+'44' : isError ? C.red+'44' : C.border}`, borderRadius:6, background:bg, color, fontSize:12, fontWeight:500, cursor: isLoading ? 'wait' : 'pointer', textAlign:'left', display:'flex', alignItems:'center', gap:8, transition:'background 0.12s' }}
+        onMouseEnter={e => { if (!isLoading && !isSuccess && !isError) e.currentTarget.style.background = C.purpleLight; }}
+        onMouseLeave={e => { if (!isLoading && !isSuccess && !isError) e.currentTarget.style.background = C.surface; }}
+      >
+        <span style={{ fontSize:14 }}>{icon}</span>
+        {isLoading ? 'Working…' : isSuccess ? `✓ ${fb.success}` : label}
+      </button>
+      {isError && !fb.loading && (
+        <div style={{ fontSize:11, color:C.red, marginTop:3, paddingLeft:8 }}>{fb.error}</div>
+      )}
+    </div>
   );
 }
 
@@ -265,12 +291,29 @@ function ComplaintTab({ report }) {
         )}
       </div>
 
-      {/* Evidence */}
+      {/* Dashcam response / Evidence */}
       <div>
-        <div style={{ fontSize:12, fontWeight:800, color:C.muted, textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:12 }}>Evidence &amp; Attachments</div>
-        <div style={{ background:C.bg, border:`1px dashed ${C.border}`, borderRadius:8, padding:'20px', textAlign:'center', color:C.muted, fontSize:13 }}>
-          📎 No attachments uploaded yet. Evidence can be added by the investigating admin.
-        </div>
+        <div style={{ fontSize:12, fontWeight:800, color:C.muted, textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:12 }}>Dashcam / Evidence</div>
+        {report.dashcamResponse ? (
+          <div style={{ background:'#f0fdf4', border:'1px solid #bbf7d0', borderRadius:10, padding:'14px 16px', display:'flex', flexDirection:'column', gap:8 }}>
+            <div style={{ display:'flex', alignItems:'center', gap:6, fontSize:12, fontWeight:700, color:C.green }}>
+              ✓ Footage response submitted by {report.dashcamResponse.submittedBy}
+              <span style={{ fontWeight:400, color:C.muted }}>· {report.dashcamResponse.submittedAt ? new Date(report.dashcamResponse.submittedAt).toLocaleDateString('en-AU',{day:'numeric',month:'short',year:'numeric'}) : ''}</span>
+            </div>
+            {report.dashcamResponse.description && (
+              <div style={{ fontSize:13, color:C.text, lineHeight:1.6 }}>{report.dashcamResponse.description}</div>
+            )}
+            {report.dashcamResponse.link && (
+              <a href={report.dashcamResponse.link} target="_blank" rel="noopener noreferrer" style={{ fontSize:13, color:C.blue, wordBreak:'break-all' }}>
+                🔗 {report.dashcamResponse.link}
+              </a>
+            )}
+          </div>
+        ) : (
+          <div style={{ background:C.bg, border:`1px dashed ${C.border}`, borderRadius:8, padding:'20px', textAlign:'center', color:C.muted, fontSize:13 }}>
+            📎 No footage submitted yet. Use Quick Actions → Request dashcam footage to prompt the user.
+          </div>
+        )}
       </div>
     </div>
   );
@@ -286,6 +329,10 @@ function InvestigationTab({ report }) {
   const [saving,     setSaving]     = useState(false);
   const [saved,      setSaved]      = useState(false);
   const [error,      setError]      = useState('');
+  const [actionFeedback,  setActionFeedback]  = useState({});
+  const [showSuspendForm, setShowSuspendForm] = useState(false);
+  const [suspendReason,   setSuspendReason]   = useState('');
+  const [suspendDuration, setSuspendDuration] = useState('7 days');
 
   async function saveToFirestore(overrideStatus) {
     if (!firebaseReady || !db) { setError('Database not available.'); return; }
@@ -315,6 +362,131 @@ function InvestigationTab({ report }) {
       setError(err.message || 'Save failed. Check your connection.');
     } finally {
       setSaving(false);
+    }
+  }
+
+  function setAction(id, state) {
+    setActionFeedback(prev => ({ ...prev, [id]: state }));
+  }
+
+  async function appendActivityLog(action, type) {
+    const by = auth?.currentUser?.email || auth?.currentUser?.uid || 'Admin';
+    await updateDoc(doc(db, FIRESTORE_COLLECTIONS.reports, report.id), {
+      activityLog: arrayUnion({ time: new Date().toISOString(), action, by, type }),
+      lastUpdated: serverTimestamp(),
+    });
+  }
+
+  async function sendNotification(recipientId, type, message) {
+    await addDoc(collection(db, FIRESTORE_COLLECTIONS.notifications), {
+      recipientId, type, message,
+      relatedReportId: report.id,
+      relatedTripId: report.tripId || '',
+      createdAt: serverTimestamp(),
+      status: 'unread',
+    });
+  }
+
+  async function handleRequestDashcam() {
+    const id = 'dashcam';
+    if (!report.driver.id) { setAction(id, { error: 'No user ID for reported user.' }); return; }
+    setAction(id, { loading: true });
+    try {
+      await sendNotification(report.driver.id, 'admin_request',
+        `An admin has requested dashcam footage for trip ${report.tripId || report.displayId}. Please submit any relevant recordings within 48 hours.`);
+      await appendActivityLog('Dashcam footage requested from reported user.', 'note');
+      setAction(id, { success: 'Request sent!' });
+      setTimeout(() => setAction(id, {}), 3000);
+    } catch (err) {
+      setAction(id, { error: err.message || 'Failed.' });
+    }
+  }
+
+  async function handleSendWarning() {
+    const id = 'warning';
+    if (!report.driver.id) { setAction(id, { error: 'No user ID for reported user.' }); return; }
+    setAction(id, { loading: true });
+    try {
+      await sendNotification(report.driver.id, 'admin_warning',
+        `You have received a formal warning regarding report ${report.displayId} (${report.violationType}). Further violations may result in account suspension.`);
+      await appendActivityLog('Warning notification sent to reported user.', 'note');
+      setAction(id, { success: 'Warning sent!' });
+      setTimeout(() => setAction(id, {}), 3000);
+    } catch (err) {
+      setAction(id, { error: err.message || 'Failed.' });
+    }
+  }
+
+  async function handleInitiateRefund() {
+    const id = 'refund';
+    if (!report.passenger.id) { setAction(id, { error: 'No user ID for reporter.' }); return; }
+    setAction(id, { loading: true });
+    try {
+      await sendNotification(report.passenger.id, 'admin_refund',
+        `Your refund for trip ${report.tripId || report.displayId} has been initiated and will be processed within 3–5 business days.`);
+      await appendActivityLog('Refund initiated for reporter.', 'note');
+      setAction(id, { success: 'Refund initiated!' });
+      setTimeout(() => setAction(id, {}), 3000);
+    } catch (err) {
+      setAction(id, { error: err.message || 'Failed.' });
+    }
+  }
+
+  async function handleSuspendUser() {
+    const id = 'suspend';
+    if (!report.driver.id) { setAction(id, { error: 'No user ID for reported user.' }); return; }
+    if (!suspendReason.trim()) { setAction(id, { error: 'Please enter a suspension reason.' }); return; }
+    setAction(id, { loading: true });
+    try {
+      const adminEmail = auth?.currentUser?.email || auth?.currentUser?.uid || 'Admin';
+      const adminUid   = auth?.currentUser?.uid;
+      await setDoc(doc(db, FIRESTORE_COLLECTIONS.users, report.driver.id), {
+        accountStatus:       'Suspended',
+        suspensionReason:    suspendReason.trim(),
+        suspensionDuration:  suspendDuration,
+        suspendedAt:         serverTimestamp(),
+        suspendedBy:         adminEmail,
+      }, { merge: true });
+      if (adminUid) {
+        await addDoc(collection(db, FIRESTORE_COLLECTIONS.auditLogs), {
+          adminId: adminUid, adminEmail,
+          targetUserId: report.driver.id,
+          action: 'SUSPEND',
+          reason: suspendReason.trim(),
+          duration: suspendDuration,
+          relatedReportId: report.id,
+          timestamp: serverTimestamp(),
+        });
+      }
+      await sendNotification(report.driver.id, 'admin_suspension',
+        `Your account has been suspended pending review of report ${report.displayId}. Reason: ${suspendReason.trim()}. Duration: ${suspendDuration}.`);
+      await appendActivityLog(`Reported user suspended. Duration: ${suspendDuration}. Reason: ${suspendReason.trim()}`, 'close');
+      setAction(id, { success: 'User suspended!' });
+      setShowSuspendForm(false);
+      setSuspendReason('');
+      setTimeout(() => setAction(id, {}), 3000);
+    } catch (err) {
+      setAction(id, { error: err.message || 'Failed to suspend user.' });
+    }
+  }
+
+  async function handleFlagFraud() {
+    const id = 'fraud';
+    if (!report.tripId) { setAction(id, { error: 'No trip ID for this report.' }); return; }
+    setAction(id, { loading: true });
+    try {
+      const adminEmail = auth?.currentUser?.email || auth?.currentUser?.uid || 'Admin';
+      await updateDoc(doc(db, FIRESTORE_COLLECTIONS.trips, report.tripId), {
+        fraudFlag: true,
+        fraudFlaggedAt: serverTimestamp(),
+        fraudFlaggedBy: adminEmail,
+        fraudReportId: report.id,
+      });
+      await appendActivityLog('Trip flagged for fraud audit.', 'escalate');
+      setAction(id, { success: 'Trip flagged!' });
+      setTimeout(() => setAction(id, {}), 3000);
+    } catch (err) {
+      setAction(id, { error: err.message || 'Failed to flag trip.' });
     }
   }
 
@@ -379,20 +551,35 @@ function InvestigationTab({ report }) {
       <div style={{ background:C.bg, borderRadius:10, padding:'14px 16px', border:`1px solid ${C.border}` }}>
         <div style={{ fontSize:12, fontWeight:700, color:C.muted, textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:12 }}>Quick Actions</div>
         <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
-          {[
-            { label:'Request dashcam footage from reported user', icon:'🎥' },
-            { label:'Send warning notification to reported user',  icon:'⚠️' },
-            { label:'Initiate refund for the reporter',            icon:'💸' },
-            { label:'Suspend reported user pending review',        icon:'🔒' },
-            { label:'Flag trip for fraud audit',                   icon:'🚩' },
-          ].map(({ label, icon }) => (
-            <button key={label} style={{ padding:'8px 12px', border:`1px solid ${C.border}`, borderRadius:6, background:C.surface, color:C.text, fontSize:12, fontWeight:500, cursor:'pointer', textAlign:'left', display:'flex', alignItems:'center', gap:8, transition:'background 0.12s' }}
-              onMouseEnter={e => e.currentTarget.style.background = C.purpleLight}
-              onMouseLeave={e => e.currentTarget.style.background = C.surface}
-            >
-              <span>{icon}</span> {label}
-            </button>
-          ))}
+          {/* Dashcam */}
+          <QuickActionBtn icon="🎥" label="Request dashcam footage from reported user" fb={actionFeedback['dashcam']} onClick={handleRequestDashcam} />
+          {/* Warning */}
+          <QuickActionBtn icon="⚠️" label="Send warning notification to reported user"  fb={actionFeedback['warning']} onClick={handleSendWarning} />
+          {/* Refund */}
+          <QuickActionBtn icon="💸" label="Initiate refund for the reporter"             fb={actionFeedback['refund']}  onClick={handleInitiateRefund} />
+          {/* Suspend */}
+          <QuickActionBtn icon="🔒" label="Suspend reported user pending review"         fb={actionFeedback['suspend']} onClick={() => { setShowSuspendForm(s => !s); setAction('suspend', {}); }} />
+          {showSuspendForm && (
+            <div style={{ marginLeft:24, padding:'12px 14px', background:C.surface, border:`1px solid ${C.red}33`, borderRadius:8, display:'flex', flexDirection:'column', gap:8 }}>
+              <textarea value={suspendReason} onChange={e => setSuspendReason(e.target.value)} rows={2} placeholder="Reason for suspension…" style={{ width:'100%', padding:'8px 10px', border:`1px solid ${C.border}`, borderRadius:6, fontSize:12, fontFamily:'inherit', resize:'vertical', boxSizing:'border-box' }} />
+              <select value={suspendDuration} onChange={e => setSuspendDuration(e.target.value)} style={{ padding:'7px 10px', border:`1px solid ${C.border}`, borderRadius:6, fontSize:12, fontFamily:'inherit', cursor:'pointer' }}>
+                {['24 hours','3 days','7 days','14 days','30 days','Indefinite'].map(d => <option key={d} value={d}>{d}</option>)}
+              </select>
+              {actionFeedback['suspend']?.error && (
+                <div style={{ fontSize:12, color:C.red }}>{actionFeedback['suspend'].error}</div>
+              )}
+              <div style={{ display:'flex', gap:8 }}>
+                <button onClick={handleSuspendUser} disabled={actionFeedback['suspend']?.loading} style={{ padding:'7px 14px', border:'none', borderRadius:6, background:C.red, color:'#fff', fontSize:12, fontWeight:700, cursor:'pointer' }}>
+                  {actionFeedback['suspend']?.loading ? 'Suspending…' : 'Confirm Suspend'}
+                </button>
+                <button onClick={() => { setShowSuspendForm(false); setSuspendReason(''); setAction('suspend', {}); }} style={{ padding:'7px 14px', border:`1px solid ${C.border}`, borderRadius:6, background:C.surface, color:C.muted, fontSize:12, cursor:'pointer' }}>
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+          {/* Flag fraud */}
+          <QuickActionBtn icon="🚩" label="Flag trip for fraud audit"                    fb={actionFeedback['fraud']}   onClick={handleFlagFraud} />
         </div>
       </div>
     </div>

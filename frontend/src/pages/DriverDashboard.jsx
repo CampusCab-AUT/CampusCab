@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
+  arrayUnion,
   collection,
   doc,
   onSnapshot,
@@ -48,6 +49,7 @@ function DriverDashboard() {
   const [tripToCancel, setTripToCancel] = useState(null);
   const [reportTarget, setReportTarget] = useState(null);
   const [reportedPassengerIds, setReportedPassengerIds] = useState([]);
+  const [footageFormState, setFootageFormState] = useState({});
   const [pushStatus, setPushStatus] = useState('idle');
   const [pushMessage, setPushMessage] = useState('');
   const isDesktop = useIsDesktop();
@@ -236,6 +238,42 @@ function DriverDashboard() {
       });
     } catch (error) {
       setMessage(`Error: ${error.message}`);
+    }
+  };
+
+  function updateFootageForm(notifId, updates) {
+    setFootageFormState(prev => ({ ...prev, [notifId]: { ...prev[notifId], ...updates } }));
+  }
+
+  const handleSubmitFootage = async (notification) => {
+    const form = footageFormState[notification.id] || {};
+    if (!form.description?.trim() && !form.link?.trim()) {
+      updateFootageForm(notification.id, { error: 'Please describe the footage or provide a link.' });
+      return;
+    }
+    updateFootageForm(notification.id, { submitting: true, error: '' });
+    try {
+      const user = auth?.currentUser;
+      if (notification.relatedReportId && db) {
+        await updateDoc(doc(db, FIRESTORE_COLLECTIONS.reports, notification.relatedReportId), {
+          dashcamResponse: {
+            description: form.description?.trim() || '',
+            link: form.link?.trim() || '',
+            submittedBy: user?.email || user?.uid || 'User',
+            submittedAt: new Date().toISOString(),
+          },
+          activityLog: arrayUnion({
+            time: new Date().toISOString(),
+            action: 'Dashcam footage response submitted by reported user.',
+            by: user?.email || user?.uid || 'User',
+            type: 'note',
+          }),
+        });
+      }
+      await handleDismissNotification(notification.id);
+      updateFootageForm(notification.id, { open: false, submitting: false });
+    } catch (err) {
+      updateFootageForm(notification.id, { submitting: false, error: err.message || 'Submission failed. Try again.' });
     }
   };
 
@@ -623,43 +661,65 @@ function DriverDashboard() {
             marginBottom: '4px',
           }}
         >
-          {unreadNotifications.map((notification) => (
-            <div
-              key={notification.id}
-              role="status"
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                gap: '12px',
-                padding: '12px 14px',
-                borderRadius: radius.md,
-                backgroundColor: colors.warningSoft,
-                border: '1px solid rgba(217, 119, 6, 0.24)',
-                color: colors.warning,
-                fontWeight: 700,
-              }}
-            >
-              <span>
-                {notification.message ||
-                  `${notification.passengerName || 'A passenger'} requested ${notification.seatsRequested || 1} seat(s).`}
-              </span>
-              <button
-                type="button"
-                onClick={() => handleDismissNotification(notification.id)}
-                style={{
-                  ...buttons.ghost,
-                  padding: '7px 10px',
-                  minHeight: 'auto',
-                  color: colors.warning,
-                  borderColor: 'rgba(217, 119, 6, 0.28)',
-                  flexShrink: 0,
-                }}
-              >
-                Mark read
-              </button>
-            </div>
-          ))}
+          {unreadNotifications.map((notification) => {
+            const ff = footageFormState[notification.id] || {};
+            const isFootageRequest = notification.type === 'admin_request';
+            return (
+              <div key={notification.id} role="status" style={{ borderRadius: radius.md, border: '1px solid rgba(217,119,6,0.24)', overflow: 'hidden' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', padding: '12px 14px', backgroundColor: colors.warningSoft, color: colors.warning, fontWeight: 700 }}>
+                  <span>
+                    {notification.message || `${notification.passengerName || 'A passenger'} requested ${notification.seatsRequested || 1} seat(s).`}
+                  </span>
+                  <div style={{ display: 'flex', gap: '8px', flexShrink: 0 }}>
+                    {isFootageRequest && (
+                      <button
+                        type="button"
+                        onClick={() => updateFootageForm(notification.id, { open: !ff.open })}
+                        style={{ ...buttons.ghost, padding: '7px 12px', minHeight: 'auto', background: colors.warning, color: '#fff', borderColor: colors.warning, fontSize: '13px' }}
+                      >
+                        {ff.open ? 'Cancel' : 'Submit Footage'}
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => handleDismissNotification(notification.id)}
+                      style={{ ...buttons.ghost, padding: '7px 10px', minHeight: 'auto', color: colors.warning, borderColor: 'rgba(217,119,6,0.28)', flexShrink: 0 }}
+                    >
+                      Mark read
+                    </button>
+                  </div>
+                </div>
+                {isFootageRequest && ff.open && (
+                  <div style={{ background: '#fff', padding: '14px', borderTop: '1px solid rgba(217,119,6,0.24)', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                    <p style={{ margin: 0, fontSize: '13px', color: '#555' }}>Describe what the footage shows, or share a link (Google Drive, Dropbox, etc.).</p>
+                    <textarea
+                      placeholder="Describe what happened and what the footage shows…"
+                      value={ff.description || ''}
+                      onChange={e => updateFootageForm(notification.id, { description: e.target.value })}
+                      rows={3}
+                      style={{ width: '100%', padding: '8px 10px', border: '1px solid rgba(217,119,6,0.3)', borderRadius: '6px', fontSize: '13px', fontFamily: 'inherit', resize: 'vertical', boxSizing: 'border-box', outline: 'none' }}
+                    />
+                    <input
+                      type="url"
+                      placeholder="Footage link (optional) — e.g. https://drive.google.com/…"
+                      value={ff.link || ''}
+                      onChange={e => updateFootageForm(notification.id, { link: e.target.value })}
+                      style={{ width: '100%', padding: '8px 10px', border: '1px solid rgba(217,119,6,0.3)', borderRadius: '6px', fontSize: '13px', fontFamily: 'inherit', boxSizing: 'border-box', outline: 'none' }}
+                    />
+                    {ff.error && <p style={{ margin: 0, color: '#dc2626', fontSize: '12px' }}>{ff.error}</p>}
+                    <button
+                      type="button"
+                      onClick={() => handleSubmitFootage(notification)}
+                      disabled={ff.submitting}
+                      style={{ alignSelf: 'flex-start', padding: '9px 20px', border: 'none', borderRadius: '6px', background: colors.warning, color: '#fff', fontSize: '13px', fontWeight: 700, cursor: ff.submitting ? 'wait' : 'pointer' }}
+                    >
+                      {ff.submitting ? 'Submitting…' : 'Submit Response'}
+                    </button>
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
 
