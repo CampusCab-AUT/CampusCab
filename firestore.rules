@@ -21,7 +21,7 @@ service cloud.firestore {
         !request.resource.data.diff(resource.data).affectedKeys()
           .hasAny(['role', 'suspended', 'suspendedUntil', 'suspendedReason']);
       allow delete: if request.auth != null && request.auth.uid == userId;
-      allow read, update: if isAdmin();
+      allow read, create, update: if isAdmin();
     }
 
     // Trips
