@@ -7,8 +7,9 @@
 
 import React, { useState, useEffect } from 'react';
 import { auth, db, firebaseReady } from './firebase';
-import { createUserWithEmailAndPassword, signInWithEmailAndPassword } from 'firebase/auth';
+import { createUserWithEmailAndPassword, signInWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
+import { requestPasswordReset } from './utils/passwordReset';
 import useIsDesktop from './hooks/useIsDesktop';
 import { buttons, colors, inputs, radius, shadows, typography } from './theme';
 /**
@@ -43,6 +44,16 @@ function Login({ onLoginSuccess }) {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setMessage('');
+
+    if (mode === 'reset') {
+      try {
+        await requestPasswordReset(auth, email, sendPasswordResetEmail);
+        setMessage('If an account with this email exists, a password reset link has been sent.');
+      } catch (error) {
+        setMessage('Error: ' + error.message);
+      }
+      return;
+    }
 
     if (mode === 'register') {
       if (!firebaseReady || !auth) {
@@ -89,7 +100,7 @@ function Login({ onLoginSuccess }) {
   };
 
   const isError = message.toLowerCase().includes('error') || message.toLowerCase().includes('invalid');
-  const showForm = mode === 'login' || mode === 'register';
+  const showForm = mode === 'login' || mode === 'register' || mode === 'reset';
 
   const heroContent = (
     <>
@@ -249,14 +260,16 @@ function Login({ onLoginSuccess }) {
 
       <div style={{ textAlign: 'center', marginBottom: '22px' }}>
         <div style={{ ...typography.eyebrow, color: colors.accent, marginBottom: '6px' }}>
-          {mode === 'register' ? 'New here' : 'Welcome back'}
+          {mode === 'register' ? 'New here' : mode === 'reset' ? 'Password Recovery' : 'Welcome back'}
         </div>
         <h2 style={{ ...typography.display, margin: 0, fontSize: '1.5rem' }}>
-          {mode === 'register' ? 'Create your account' : 'Sign in to continue'}
+          {mode === 'register' ? 'Create your account' : mode === 'reset' ? 'Reset Password' : 'Sign in to continue'}
         </h2>
         <p style={{ ...typography.body, margin: '8px 0 0' }}>
           {mode === 'register'
             ? 'Use your @aut.ac.nz or @autuni.ac.nz email.'
+            : mode === 'reset'
+            ? 'Enter your email to receive a secure reset link.'
             : 'Enter your credentials to open your dashboard.'}
         </p>
       </div>
@@ -276,26 +289,46 @@ function Login({ onLoginSuccess }) {
           />
         </div>
 
-        <div>
-          <label style={inputs.label}>Password</label>
-          <input
-            type="password"
-            placeholder="Minimum 6 characters"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            onFocus={() => setPassFocus(true)}
-            onBlur={() => setPassFocus(false)}
-            required
-            style={{ ...inputs.field, ...(passFocus ? inputs.fieldFocus : null) }}
-          />
-        </div>
+        {mode !== 'reset' && (
+          <div>
+            <label style={inputs.label}>Password</label>
+            <input
+              type="password"
+              placeholder="Minimum 6 characters"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              onFocus={() => setPassFocus(true)}
+              onBlur={() => setPassFocus(false)}
+              required
+              style={{ ...inputs.field, ...(passFocus ? inputs.fieldFocus : null) }}
+            />
+          </div>
+        )}
 
         <button type="submit" style={{ ...buttons.accent, marginTop: '6px' }}>
-          {mode === 'register' ? 'Create account' : 'Log in'}
+          {mode === 'register' ? 'Create account' : mode === 'reset' ? 'Send Reset Link' : 'Log in'}
         </button>
       </form>
 
-      <div style={{ textAlign: 'center', marginTop: '16px' }}>
+      <div style={{ textAlign: 'center', marginTop: '16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+        {mode === 'login' && (
+          <button
+            type="button"
+            onClick={() => switchMode('reset')}
+            style={{
+              background: 'none',
+              border: 'none',
+              color: colors.textSubtle,
+              fontWeight: 600,
+              fontSize: '0.85rem',
+              cursor: 'pointer',
+              padding: 0,
+              textDecoration: 'underline',
+            }}
+          >
+            Forgot your password?
+          </button>
+        )}
         <button
           type="button"
           onClick={() => switchMode(mode === 'register' ? 'login' : 'register')}
@@ -309,7 +342,7 @@ function Login({ onLoginSuccess }) {
             padding: 0,
           }}
         >
-          {mode === 'register' ? 'Already have an account? Log in' : "Don't have an account? Register"}
+          {mode === 'register' || mode === 'reset' ? 'Back to Login' : "Don't have an account? Register"}
         </button>
       </div>
 
