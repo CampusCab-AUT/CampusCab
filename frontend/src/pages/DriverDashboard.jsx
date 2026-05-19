@@ -20,6 +20,7 @@ import useIsDesktop from '../hooks/useIsDesktop';
 import { buttons, colors, pills, radius, shadows, typography } from '../theme';
 import { registerBrowserPushToken } from '../utils/pushNotifications';
 import ReportUserModal from '../components/ReportUserModal';
+import ActiveTripManager from '../components/ActiveTripManager';
 
 function getTripTimeValue(trip) {
   const date = trip.createdAt?.toDate?.() || new Date(trip.createdAt || trip.departureTime || 0);
@@ -45,6 +46,17 @@ function DriverDashboard() {
   const [message, setMessage] = useState('');
   const [busyRequestId, setBusyRequestId] = useState('');
   const [busyTripId, setBusyTripId] = useState('');
+  const [activeTripId, setActiveTripId] = useState(null);
+
+  // Automatically select a trip that is in progress
+  useEffect(() => {
+    const inProgressTrip = trips.find(
+      (t) => (t.status || '').toLowerCase() === TRIP_STATUS.inProgress
+    );
+    if (inProgressTrip && !activeTripId) {
+      setActiveTripId(inProgressTrip.id);
+    }
+  }, [trips, activeTripId]);
   const [tripToCancel, setTripToCancel] = useState(null);
   const [reportTarget, setReportTarget] = useState(null);
   const [reportedPassengerIds, setReportedPassengerIds] = useState([]);
@@ -190,10 +202,24 @@ function DriverDashboard() {
       trips
         .filter((trip) => {
           const status = (trip.status || TRIP_STATUS.active).toLowerCase();
-          return status === TRIP_STATUS.active || status === TRIP_STATUS.full;
+          return (
+            status === TRIP_STATUS.active ||
+            status === TRIP_STATUS.full ||
+            status === TRIP_STATUS.inProgress
+          );
         })
         .sort((a, b) => getTripTimeValue(b) - getTripTimeValue(a)),
     [trips],
+  );
+
+  const activeTrip = useMemo(
+    () => trips.find((t) => t.id === activeTripId),
+    [trips, activeTripId]
+  );
+
+  const activeTripRequests = useMemo(
+    () => approvedRequests.filter((r) => r.tripId === activeTripId),
+    [approvedRequests, activeTripId]
   );
 
   const pendingRequests = useMemo(

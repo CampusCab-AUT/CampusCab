@@ -143,7 +143,10 @@ export function RouteMap({ origin, destination, setRouteGeoJson }) {
   useEffect(() => {
     if (origin && destination) {
       fetch(`https://router.project-osrm.org/route/v1/driving/${origin.lon},${origin.lat};${destination.lon},${destination.lat}?overview=full&geometries=geojson`)
-        .then(r => r.json())
+        .then(r => {
+          if (!r.ok) throw new Error('OSRM network response was not ok');
+          return r.json();
+        })
         .then(data => {
           if (data.routes && data.routes.length > 0) {
             const geojson = data.routes[0].geometry;
@@ -151,7 +154,18 @@ export function RouteMap({ origin, destination, setRouteGeoJson }) {
             // GeoJSON coordinates are [lon, lat], Leaflet expects [lat, lon]
             const coords = geojson.coordinates.map(c => [c[1], c[0]]);
             setRouteCoords(coords);
+          } else {
+            throw new Error('No routes found');
           }
+        })
+        .catch(err => {
+          console.error("OSRM routing failed, using straight-line fallback:", err);
+          const fallbackGeoJson = {
+            type: "LineString",
+            coordinates: [[origin.lon, origin.lat], [destination.lon, destination.lat]]
+          };
+          if (setRouteGeoJson) setRouteGeoJson(fallbackGeoJson);
+          setRouteCoords([[origin.lat, origin.lon], [destination.lat, destination.lon]]);
         });
     } else {
       setRouteCoords([]);
