@@ -126,7 +126,9 @@ function PersonCard({ title, person, role }) {
         </div>
         <div>
           <div style={{ fontWeight:700, fontSize:14, color:C.text }}>{person.name}</div>
-          <div style={{ fontSize:11, color:C.muted }}>ID: {person.id ? person.id.slice(0,12)+'…' : '—'}</div>
+          <div style={{ fontSize:11, color:C.muted }}>
+            {person.id ? `UID: ${person.id.slice(0, 10)}…` : '—'}
+          </div>
         </div>
       </div>
       {role === 'reported' && person.rating != null && (

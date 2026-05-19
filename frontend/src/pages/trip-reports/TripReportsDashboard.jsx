@@ -84,10 +84,12 @@ function normalizeStatus(s) {
   return s || 'New';
 }
 
-function mapDoc(docSnap, trip) {
+function mapDoc(docSnap, trip, userMap = {}) {
   const d = docSnap.data();
-  const reportedName = d.reportedUserName || d.reportedUserId || 'Unknown User';
-  const reporterName = d.reporterName || (d.reporterId ? `User …${d.reporterId.slice(-6)}` : 'Unknown');
+  const reportedUser = userMap[d.reportedUserId];
+  const reporter     = userMap[d.reporterId];
+  const reportedName = reportedUser?.email || d.reportedUserName || d.reportedUserId || 'Unknown User';
+  const reporterName = reporter?.email     || d.reporterName    || (d.reporterId ? `User …${d.reporterId.slice(-6)}` : 'Unknown');
   return {
     id:       docSnap.id,
     displayId: `#${docSnap.id.slice(0, 8).toUpperCase()}`,
@@ -96,6 +98,7 @@ function mapDoc(docSnap, trip) {
       id:       d.reportedUserId || '',
       name:     reportedName,
       initials: getInitials(reportedName),
+      email:    reportedUser?.email || null,
       rating:   null,
       trips:    null,
     },
@@ -103,6 +106,7 @@ function mapDoc(docSnap, trip) {
       id:       d.reporterId || '',
       name:     reporterName,
       initials: getInitials(reporterName),
+      email:    reporter?.email || null,
     },
     violationType: d.violationType || 'Other',
     severity:      d.severity || 'Medium',
@@ -428,7 +432,20 @@ export default function TripReportsDashboard() {
           } catch { /* ignore missing trips */ }
         }));
 
-        setReports(docs.map(d => mapDoc(d, tripMap[d.data().tripId] || null)));
+        // Batch-fetch unique user profiles to resolve emails
+        const userIds = [...new Set([
+          ...docs.map(d => d.data().reportedUserId).filter(Boolean),
+          ...docs.map(d => d.data().reporterId).filter(Boolean),
+        ])];
+        const userMap = {};
+        await Promise.all(userIds.map(async (uid) => {
+          try {
+            const userDoc = await getDoc(doc(db, FIRESTORE_COLLECTIONS.users, uid));
+            if (userDoc.exists()) userMap[uid] = userDoc.data();
+          } catch { /* ignore inaccessible profiles */ }
+        }));
+
+        setReports(docs.map(d => mapDoc(d, tripMap[d.data().tripId] || null, userMap)));
       } catch (err) {
         setError(err.message);
       } finally {
