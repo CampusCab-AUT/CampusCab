@@ -8,6 +8,7 @@ import {
   orderBy,
   query,
   serverTimestamp,
+  setDoc,
   updateDoc,
   where,
 } from 'firebase/firestore';
@@ -144,13 +145,13 @@ export default function UserModerationPage({ userId, userName, onBack }) {
     try {
       const adminId = auth.currentUser?.uid;
 
-      await updateDoc(doc(db, FIRESTORE_COLLECTIONS.users, userId), {
+      await setDoc(doc(db, FIRESTORE_COLLECTIONS.users, userId), {
         accountStatus: 'Suspended',
         suspensionReason: reason,
         suspensionDuration: duration,
         suspendedAt: new Date().toISOString(),
         suspendedBy: adminId,
-      });
+      }, { merge: true });
 
       await addDoc(collection(db, FIRESTORE_COLLECTIONS.auditLogs), {
         adminId,
@@ -241,22 +242,20 @@ export default function UserModerationPage({ userId, userName, onBack }) {
               SUSPENDED — {userProfile.suspensionDuration}
             </span>
           )}
-          {userProfile && (
-            isSuspended ? (
-              <button
-                onClick={handleUnsuspend}
-                style={{ padding: '10px 20px', borderRadius: 6, border: 'none', background: '#198754', color: 'white', fontWeight: 700, cursor: 'pointer', fontSize: 14 }}
-              >
-                Unsuspend Account
-              </button>
-            ) : (
-              <button
-                onClick={() => setShowModal(true)}
-                style={{ padding: '10px 20px', borderRadius: 6, border: 'none', background: '#dc3545', color: 'white', fontWeight: 700, cursor: 'pointer', fontSize: 14 }}
-              >
-                Suspend Account
-              </button>
-            )
+          {isSuspended ? (
+            <button
+              onClick={handleUnsuspend}
+              style={{ padding: '10px 20px', borderRadius: 6, border: 'none', background: '#198754', color: 'white', fontWeight: 700, cursor: 'pointer', fontSize: 14 }}
+            >
+              Unsuspend Account
+            </button>
+          ) : (
+            <button
+              onClick={() => setShowModal(true)}
+              style={{ padding: '10px 20px', borderRadius: 6, border: 'none', background: '#dc3545', color: 'white', fontWeight: 700, cursor: 'pointer', fontSize: 14 }}
+            >
+              Suspend Account
+            </button>
           )}
         </div>
       </div>

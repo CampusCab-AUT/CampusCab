@@ -1,5 +1,6 @@
 const functions = require('firebase-functions');
 const admin = require('firebase-admin');
+const nodemailer = require('nodemailer');
 
 if (!admin.apps.length) {
   admin.initializeApp();
@@ -22,6 +23,39 @@ const TRIP_STATUS = {
 const NOTIFICATION_STATUS = {
   unread: 'unread',
 };
+
+const getSmtpTransporter = () =>
+  nodemailer.createTransport({
+    host: process.env.SMTP_HOST || 'smtp.gmail.com',
+    port: parseInt(process.env.SMTP_PORT || '587', 10),
+    secure: false,
+    auth: {
+      user: process.env.SMTP_USER,
+      pass: process.env.SMTP_PASS,
+    },
+  });
+
+const SUSPENSION_EMAIL_HTML = ({ displayName, reason, duration }) => `
+<!DOCTYPE html>
+<html>
+  <body style="font-family: Arial, sans-serif; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+    <h2 style="color: #d32f2f;">Your CampusCab Account Has Been Suspended</h2>
+    <p>Hi ${displayName || 'there'},</p>
+    <p>Your CampusCab account has been suspended by an administrator.</p>
+    <table style="border-collapse: collapse; width: 100%; margin: 16px 0;">
+      <tr>
+        <td style="padding: 8px; font-weight: bold; width: 120px;">Reason:</td>
+        <td style="padding: 8px;">${reason}</td>
+      </tr>
+      <tr style="background: #f5f5f5;">
+        <td style="padding: 8px; font-weight: bold;">Duration:</td>
+        <td style="padding: 8px;">${duration}</td>
+      </tr>
+    </table>
+    <p>If you believe this is a mistake, please contact support.</p>
+    <p style="color: #888; font-size: 12px;">— The CampusCab Team</p>
+  </body>
+</html>`;
 
 const getPositiveInteger = (value, fallback = 1) => {
   const parsed = Number(value);
@@ -323,6 +357,62 @@ exports.onApprovedRideRequestCancelled = functions.firestore
       seatsRequested: restoreResult.seatsRequested,
       restoredSeats: restoreResult.restoredSeats,
     });
+
+    return null;
+  });
+
+exports.onUserSuspended = functions.firestore
+  .document('users/{userId}')
+  .onUpdate(async (change, context) => {
+    const before = change.before.data();
+    const after = change.after.data();
+
+    // Only fire when status transitions TO 'Suspended'
+    if (before.accountStatus === 'Suspended' || after.accountStatus !== 'Suspended') {
+      return null;
+    }
+
+    const { userId } = context.params;
+    const reason = after.suspensionReason || 'Violation of terms of service';
+    const duration = after.suspensionDuration || 'Indefinite';
+
+    let userEmail;
+    let displayName;
+    try {
+      const userRecord = await admin.auth().getUser(userId);
+      userEmail = userRecord.email;
+      displayName = userRecord.displayName;
+    } catch (err) {
+      functions.logger.error('onUserSuspended: failed to fetch user from Auth.', { userId, error: err.message });
+      return null;
+    }
+
+    if (!userEmail) {
+      functions.logger.warn('onUserSuspended: user has no email address; skipping notification.', { userId });
+      return null;
+    }
+
+    try {
+      const transporter = getSmtpTransporter();
+      await transporter.sendMail({
+        from: `"CampusCab" <${process.env.SMTP_USER}>`,
+        to: userEmail,
+        subject: 'Your CampusCab account has been suspended',
+        html: SUSPENSION_EMAIL_HTML({ displayName, reason, duration }),
+      });
+      functions.logger.info('onUserSuspended: suspension email sent.', { userId, userEmail });
+    } catch (err) {
+      functions.logger.error('onUserSuspended: failed to send suspension email.', { userId, error: err.message });
+
+      // Log "Notification Failed" to audit logs per acceptance criteria
+      await db.collection('auditLogs').add({
+        action: 'NOTIFICATION_FAILED',
+        targetUserId: userId,
+        notificationType: 'suspension_email',
+        error: err.message,
+        timestamp: new Date(),
+      });
+    }
 
     return null;
   });
