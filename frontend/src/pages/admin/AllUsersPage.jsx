@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { collection, getDocs, orderBy, query } from 'firebase/firestore';
+import { collection, getDocs } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { FIRESTORE_COLLECTIONS } from '../../firestoreModel';
 
@@ -228,22 +228,26 @@ export default function AllUsersPage({ onSelectUser }) {
     return () => clearTimeout(searchTimer.current);
   }, [search]);
 
-  // Load all users
+  // Load all users — no orderBy so docs without createdAt aren't silently excluded.
+  // Client-side sorting handles ordering.
   useEffect(() => {
     const load = async () => {
       try {
-        const snap = await getDocs(
-          query(collection(db, FIRESTORE_COLLECTIONS.users), orderBy('createdAt', 'desc'))
-        );
-        setUsers(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
-      } catch (err) {
-        // Fallback: try without orderBy if index missing
-        try {
-          const snap = await getDocs(collection(db, FIRESTORE_COLLECTIONS.users));
-          setUsers(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
-        } catch (e2) {
-          setError(e2.message);
+        const snap = await getDocs(collection(db, FIRESTORE_COLLECTIONS.users));
+        const docs = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        console.log(`[AllUsers] loaded ${docs.length} user(s) from Firestore`);
+        setUsers(docs);
+        if (docs.length === 0) {
+          console.warn(
+            '[AllUsers] 0 users returned. Two possible causes:\n' +
+            '  1. The users Firestore collection is genuinely empty.\n' +
+            '  2. Your admin account does not have role="Admin" in its users/{uid} document.\n' +
+            '     Fix: open Firebase Console → Firestore → users → your UID → add field role: "Admin"'
+          );
         }
+      } catch (err) {
+        console.error('[AllUsers] Firestore error:', err.message);
+        setError(err.message);
       } finally {
         setLoading(false);
       }
@@ -517,13 +521,27 @@ export default function AllUsersPage({ onSelectUser }) {
                       <tr>
                         <td colSpan={7}>
                           <div style={{ padding: '56px 24px', textAlign: 'center' }}>
-                            <div style={{ fontSize: 48, marginBottom: 12 }}>🔍</div>
+                            <div style={{ fontSize: 48, marginBottom: 12 }}>
+                              {hasFilters ? '🔍' : '👤'}
+                            </div>
                             <div style={{ fontSize: 16, fontWeight: 700, color: '#0f172a', marginBottom: 6 }}>
-                              No users found
+                              {hasFilters ? 'No users match your filters' : 'No users found'}
                             </div>
-                            <div style={{ fontSize: 13, color: '#94a3b8' }}>
-                              {hasFilters ? 'Try adjusting your search or filters.' : 'No users have registered yet.'}
+                            <div style={{ fontSize: 13, color: '#94a3b8', maxWidth: 420, margin: '0 auto' }}>
+                              {hasFilters
+                                ? 'Try adjusting your search or clearing the filters.'
+                                : 'Either no users have registered yet, or your admin account is missing role="Admin" in Firestore. Check the browser console for details.'}
                             </div>
+                            {!hasFilters && (
+                              <div style={{
+                                marginTop: 16, padding: '12px 16px', borderRadius: 10,
+                                background: '#fffbeb', border: '1px solid #fde68a',
+                                fontSize: 12, color: '#92400e', maxWidth: 460, margin: '14px auto 0',
+                                textAlign: 'left', lineHeight: 1.6,
+                              }}>
+                                <strong>If you expect to see users:</strong> open the Firebase Console → Firestore → <code>users</code> collection → find your UID → add field <code>role: "Admin"</code> (string). Then refresh this page.
+                              </div>
+                            )}
                           </div>
                         </td>
                       </tr>
