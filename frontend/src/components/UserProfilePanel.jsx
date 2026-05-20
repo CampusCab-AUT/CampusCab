@@ -5,6 +5,7 @@ import { updateProfile } from 'firebase/auth';
 import { auth, db, storage, firebaseReady } from '../firebase';
 import { FIRESTORE_COLLECTIONS } from '../firestoreModel';
 import { colors, radius, spacing, typography, surfaces, buttons, inputs } from '../theme';
+import SavedAddresses from './SavedAddresses';
 
 export default function UserProfilePanel() {
   const [displayName, setDisplayName] = useState('');
@@ -239,6 +240,10 @@ export default function UserProfilePanel() {
           {loading ? 'Saving Profile...' : 'Save Profile'}
         </button>
       </form>
+
+      <div style={{ ...surfaces.card, padding: spacing.xl, marginTop: spacing.xl }}>
+        <SavedAddresses />
+      </div>
     </div>
   );
 }
