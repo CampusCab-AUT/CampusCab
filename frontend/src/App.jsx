@@ -11,6 +11,7 @@ import AdminDashboard from './pages/AdminDashboard';
 import { FIRESTORE_COLLECTIONS } from './firestoreModel';
 import useIsDesktop from './hooks/useIsDesktop';
 import DriverDashboard from './pages/DriverDashboard';
+import DriverTripView from './components/DriverTripView';
 import PassengerDashboard from './pages/PassengerDashboard';
 import UserProfilePanel from './components/UserProfilePanel';
 import Stepper from './components/Stepper';
@@ -462,6 +463,7 @@ function DriverExperience() {
   const [vehicle, setVehicle] = useState(null);
   const [loading, setLoading] = useState(true);
   const [onboardingComplete, setOnboardingComplete] = useState(false);
+  const [showLiveTrip, setShowLiveTrip] = useState(false);
   const isDesktop = useIsDesktop();
 
   useEffect(() => {
@@ -517,6 +519,10 @@ function DriverExperience() {
     );
   }
 
+  if (showLiveTrip) {
+    return <DriverTripView onBackToDashboard={() => setShowLiveTrip(false)} />;
+  }
+
   return (
     <div
       style={{
@@ -525,6 +531,45 @@ function DriverExperience() {
         gridTemplateColumns: isDesktop ? 'repeat(2, minmax(0, 1fr))' : '1fr',
       }}
     >
+      <section 
+        style={{ 
+          gridColumn: isDesktop ? '1 / -1' : 'auto', 
+          ...surfaces.card, 
+          padding: '24px', 
+          background: colors.accentGradient, 
+          color: 'white', 
+          display: 'flex', 
+          justifyContent: 'space-between', 
+          alignItems: 'center', 
+          flexWrap: 'wrap', 
+          gap: '16px' 
+        }}
+      >
+        <div>
+          <h3 style={{ margin: 0, fontSize: '1.2rem', fontWeight: 900, color: 'white', letterSpacing: '-0.01em' }}>Demo Live Trip View</h3>
+          <p style={{ margin: '4px 0 0', opacity: 0.88, fontSize: '0.86rem', fontWeight: 600 }}>Test the mobile-first trip state manager with accessible start/end controls.</p>
+        </div>
+        <button 
+          onClick={() => setShowLiveTrip(true)} 
+          style={{ 
+            border: 'none', 
+            borderRadius: radius.pill, 
+            padding: '12px 24px', 
+            background: 'white', 
+            color: colors.accent, 
+            fontWeight: 800, 
+            cursor: 'pointer',
+            boxShadow: '0 8px 20px rgba(15, 118, 110, 0.25)',
+            fontSize: '0.9rem',
+            transition: 'transform 0.15s ease'
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.transform = 'scale(1.02)'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.transform = 'scale(1)'; }}
+        >
+          Open Live View
+        </button>
+      </section>
+
       <Card padding="0">
         <VehicleProfile initialVehicle={vehicle} onSaved={setVehicle} compact />
       </Card>
