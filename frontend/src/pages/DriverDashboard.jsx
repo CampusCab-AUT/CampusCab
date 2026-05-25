@@ -20,6 +20,8 @@ import useIsDesktop from '../hooks/useIsDesktop';
 import { buttons, colors, pills, radius, shadows, typography } from '../theme';
 import { registerBrowserPushToken } from '../utils/pushNotifications';
 import ReportUserModal from '../components/ReportUserModal';
+import ChatWindow from '../components/ChatWindow';
+import { canViewChat } from '../utils/chatPermissions';
 
 function getTripTimeValue(trip) {
   const date = trip.createdAt?.toDate?.() || new Date(trip.createdAt || trip.departureTime || 0);
@@ -50,6 +52,7 @@ function DriverDashboard() {
   const [reportedPassengerIds, setReportedPassengerIds] = useState([]);
   const [pushStatus, setPushStatus] = useState('idle');
   const [pushMessage, setPushMessage] = useState('');
+  const [chatModalRide, setChatModalRide] = useState(null);
   const isDesktop = useIsDesktop();
 
   useEffect(() => {
@@ -1053,8 +1056,28 @@ function DriverDashboard() {
                       {trip?.origin || '?'} → {trip?.destination || '?'}
                     </div>
                   </div>
-                  <button
-                    type="button"
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                    {canViewChat(request.status) && (
+                      <button
+                        type="button"
+                        onClick={() => setChatModalRide(request)}
+                        style={{
+                          padding: '6px 14px',
+                          borderRadius: '8px',
+                          border: '1px solid #0ea5e9',
+                          backgroundColor: '#0ea5e9',
+                          color: '#fff',
+                          cursor: 'pointer',
+                          fontWeight: 600,
+                          fontSize: '0.82rem',
+                          flexShrink: 0,
+                        }}
+                      >
+                        Chat
+                      </button>
+                    )}
+                    <button
+                      type="button"
                     disabled={alreadyReported}
                     onClick={() =>
                       setReportTarget({
@@ -1078,11 +1101,20 @@ function DriverDashboard() {
                     {alreadyReported ? 'Reported' : 'Report'}
                   </button>
                 </div>
+                </div>
               );
             })}
           </div>
         )}
       </div>
+
+      {chatModalRide && (
+        <ChatWindow
+          rideRequest={chatModalRide}
+          currentUser={auth.currentUser}
+          onClose={() => setChatModalRide(null)}
+        />
+      )}
 
       {reportTarget && (
         <ReportUserModal
