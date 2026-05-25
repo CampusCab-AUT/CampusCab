@@ -463,7 +463,7 @@ function DriverExperience() {
   const [vehicle, setVehicle] = useState(null);
   const [loading, setLoading] = useState(true);
   const [onboardingComplete, setOnboardingComplete] = useState(false);
-  const [showLiveTrip, setShowLiveTrip] = useState(false);
+  const [liveTripId, setLiveTripId] = useState(null);
   const isDesktop = useIsDesktop();
 
   useEffect(() => {
@@ -519,8 +519,8 @@ function DriverExperience() {
     );
   }
 
-  if (showLiveTrip) {
-    return <DriverTripView onBackToDashboard={() => setShowLiveTrip(false)} />;
+  if (liveTripId) {
+    return <DriverTripView tripId={liveTripId} onBackToDashboard={() => setLiveTripId(null)} />;
   }
 
   return (
@@ -550,7 +550,7 @@ function DriverExperience() {
           <p style={{ margin: '4px 0 0', opacity: 0.88, fontSize: '0.86rem', fontWeight: 600 }}>Test the mobile-first trip state manager with accessible start/end controls.</p>
         </div>
         <button 
-          onClick={() => setShowLiveTrip(true)} 
+          onClick={() => setLiveTripId('demo')} 
           style={{ 
             border: 'none', 
             borderRadius: radius.pill, 
@@ -577,7 +577,7 @@ function DriverExperience() {
         <CreateTrip />
       </Card>
       <section style={{ ...surfaces.card, padding: 0, overflow: 'hidden', gridColumn: isDesktop ? '1 / -1' : 'auto' }}>
-        <DriverDashboard />
+        <DriverDashboard onOpenLiveTrip={(tripId) => setLiveTripId(tripId)} />
       </section>
     </div>
   );

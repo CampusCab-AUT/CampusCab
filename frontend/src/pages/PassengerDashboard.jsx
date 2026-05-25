@@ -349,13 +349,29 @@ function PassengerDashboard() {
   const now = new Date();
   
   const actualUpcomingRides = upcomingRides.filter(ride => {
-    if (!ride.trip?.departureTime) return false;
-    return new Date(ride.trip.departureTime) > now || ride.status === RIDE_REQUEST_STATUS.pending;
+    if (ride.status === RIDE_REQUEST_STATUS.pending) return true;
+    if (ride.status === RIDE_REQUEST_STATUS.approved) {
+      const tripStatus = ride.trip?.status;
+      if (tripStatus === 'completed' || tripStatus === 'cancelled') return false;
+      if (tripStatus === 'in_progress') return true;
+      if (ride.trip?.departureTime) {
+        return new Date(ride.trip.departureTime) > now;
+      }
+      return true;
+    }
+    return false;
   });
 
   const actualPastRides = upcomingRides.filter(ride => {
-    if (!ride.trip?.departureTime) return false;
-    return new Date(ride.trip.departureTime) <= now && ride.status === RIDE_REQUEST_STATUS.approved;
+    if (ride.status === RIDE_REQUEST_STATUS.approved) {
+      const tripStatus = ride.trip?.status;
+      if (tripStatus === 'completed') return true;
+      if (tripStatus === 'in_progress') return false;
+      if (ride.trip?.departureTime) {
+        return new Date(ride.trip.departureTime) <= now;
+      }
+    }
+    return false;
   });
 
   return (
@@ -548,6 +564,42 @@ function PassengerDashboard() {
                         }}>
                           Status: {ride.status === RIDE_REQUEST_STATUS.pending ? 'Pending Approval' : 'Approved'}
                         </div>
+                        {ride.trip?.status === 'in_progress' && (
+                          <div style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            marginTop: '8px',
+                            padding: '6px 12px',
+                            backgroundColor: '#ecfdf5',
+                            color: '#059669',
+                            fontWeight: 'bold',
+                            fontSize: '0.85rem',
+                            borderRadius: '20px',
+                            border: '1px solid #10b98130',
+                            animation: 'pulse-slow 2s infinite'
+                          }}>
+                            <span style={{
+                              width: '8px',
+                              height: '8px',
+                              borderRadius: '50%',
+                              backgroundColor: '#10b981',
+                              display: 'inline-block',
+                              animation: 'ping 1.5s infinite'
+                            }} />
+                            <style>{`
+                              @keyframes pulse-slow {
+                                0%, 100% { opacity: 1; }
+                                50% { opacity: 0.8; }
+                              }
+                              @keyframes ping {
+                                0% { transform: scale(1); opacity: 1; }
+                                70%, 100% { transform: scale(2.2); opacity: 0; }
+                              }
+                            `}</style>
+                            🚗 Trip In Progress!
+                          </div>
+                        )}
                         <button
                           type="button"
                           onClick={() => setRideToCancel(ride)}

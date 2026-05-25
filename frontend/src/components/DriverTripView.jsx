@@ -1,37 +1,189 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { doc, onSnapshot, updateDoc, collection, query, where, getDoc } from 'firebase/firestore';
+import { db, firebaseReady } from '../firebase';
+import { FIRESTORE_COLLECTIONS, TRIP_STATUS, RIDE_REQUEST_STATUS } from '../firestoreModel';
 
-export default function DriverTripView({ onBackToDashboard }) {
+export default function DriverTripView({ tripId, onBackToDashboard }) {
   const [tripState, setTripState] = useState('not_started'); // 'not_started' | 'in_progress' | 'completed'
+  const [tripData, setTripData] = useState(null);
+  const [approvedPassengers, setApprovedPassengers] = useState([]);
 
-  // Passenger & Trip Details
-  const passenger = {
-    name: 'Jamie Chen',
-    avatarInitials: 'JC',
-    rating: '4.9',
-    role: 'Undergrad Student',
-    pickup: 'AUT City Campus (WG Building)',
-    dropoff: 'AUT North Shore Campus (AL Block)',
-    seats: 2,
-    fareShare: '$8.50',
-    eta: '18 mins',
-    distance: '12.4 km'
-  };
+  const isDemo = !firebaseReady || !tripId || tripId === 'demo';
 
-  const handleStartTrip = () => {
-    if (tripState === 'not_started') {
-      setTripState('in_progress');
+  // Listen to trip status
+  useEffect(() => {
+    if (isDemo) return;
+
+    const tripRef = doc(db, FIRESTORE_COLLECTIONS.trips, tripId);
+    const unsubscribe = onSnapshot(tripRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.data();
+        setTripData(data);
+        const status = data.status;
+        if (status === 'in_progress') {
+          setTripState('in_progress');
+        } else if (status === 'completed') {
+          setTripState('completed');
+        } else {
+          setTripState('not_started');
+        }
+      }
+    });
+
+    return () => unsubscribe();
+  }, [tripId, isDemo]);
+
+  // Listen to approved passengers
+  useEffect(() => {
+    if (isDemo) return;
+
+    const q = query(
+      collection(db, FIRESTORE_COLLECTIONS.rideRequests),
+      where('tripId', '==', tripId),
+      where('status', '==', RIDE_REQUEST_STATUS.approved)
+    );
+
+    const unsubscribe = onSnapshot(q, async (querySnapshot) => {
+      const requests = [];
+      for (const d of querySnapshot.docs) {
+        const reqData = d.data();
+        const passengerId = reqData.passengerId;
+        let profile = { displayName: 'Passenger', role: 'Student', rating: '5.0' };
+        if (passengerId) {
+          try {
+            const userDoc = await getDoc(doc(db, FIRESTORE_COLLECTIONS.users, passengerId));
+            if (userDoc.exists()) {
+              const uData = userDoc.data();
+              profile = {
+                displayName: uData.displayName || uData.name || 'Passenger',
+                role: uData.role || 'Student',
+                rating: uData.rating || '5.0',
+              };
+            }
+          } catch (e) {
+            console.error('Error fetching passenger profile:', e);
+          }
+        }
+        requests.push({
+          id: d.id,
+          ...reqData,
+          passengerName: profile.displayName,
+          passengerRole: profile.role,
+          passengerRating: profile.rating,
+        });
+      }
+      setApprovedPassengers(requests);
+    });
+
+    return () => unsubscribe();
+  }, [tripId, isDemo]);
+
+  const handleStartTrip = async () => {
+    if (isDemo) {
+      if (tripState === 'not_started') {
+        setTripState('in_progress');
+      }
+      return;
+    }
+
+    try {
+      const tripRef = doc(db, FIRESTORE_COLLECTIONS.trips, tripId);
+      await updateDoc(tripRef, {
+        status: 'in_progress',
+        startedAt: new Date().toISOString(),
+      });
+    } catch (e) {
+      console.error('Error starting trip in Firestore:', e);
     }
   };
 
-  const handleEndTrip = () => {
-    if (tripState === 'in_progress') {
-      setTripState('completed');
+  const handleEndTrip = async () => {
+    if (isDemo) {
+      if (tripState === 'in_progress') {
+        setTripState('completed');
+      }
+      return;
+    }
+
+    try {
+      const tripRef = doc(db, FIRESTORE_COLLECTIONS.trips, tripId);
+      await updateDoc(tripRef, {
+        status: 'completed',
+        endedAt: new Date().toISOString(),
+      });
+    } catch (e) {
+      console.error('Error ending trip in Firestore:', e);
     }
   };
 
   const handleResetDemo = () => {
-    setTripState('not_started');
+    if (isDemo) {
+      setTripState('not_started');
+    }
   };
+
+  // Construct active passenger data
+  let activePassenger = null;
+  if (isDemo) {
+    activePassenger = {
+      name: 'Jamie Chen',
+      avatarInitials: 'JC',
+      rating: '4.9',
+      role: 'Undergrad Student',
+      pickup: 'AUT City Campus (WG Building)',
+      dropoff: 'AUT North Shore Campus (AL Block)',
+      seats: 2,
+      fareShare: '$8.50',
+      eta: '18 mins',
+      distance: '12.4 km'
+    };
+  } else if (approvedPassengers.length > 0) {
+    const pickupLoc = tripData?.origin || 'Pickup Point';
+    const dropoffLoc = tripData?.destination || 'Drop-off Point';
+    const totalSeats = approvedPassengers.reduce((sum, r) => sum + (r.seatsRequested || 1), 0);
+    
+    if (approvedPassengers.length === 1) {
+      const p = approvedPassengers[0];
+      activePassenger = {
+        name: p.passengerName,
+        avatarInitials: p.passengerName.split(' ').map(n => n[0]).join('').toUpperCase() || 'P',
+        rating: p.passengerRating,
+        role: p.passengerRole,
+        pickup: pickupLoc,
+        dropoff: dropoffLoc,
+        seats: totalSeats,
+        fareShare: 'Free',
+        eta: '18 mins',
+        distance: '12.4 km'
+      };
+    } else {
+      activePassenger = {
+        name: `${approvedPassengers.length} Passengers`,
+        avatarInitials: '👥',
+        rating: '5.0',
+        role: 'Carpool Group',
+        pickup: pickupLoc,
+        dropoff: dropoffLoc,
+        seats: totalSeats,
+        fareShare: 'Free',
+        eta: '18 mins',
+        distance: '12.4 km'
+      };
+    }
+  } else {
+    activePassenger = {
+      name: 'No Approved Passengers',
+      avatarInitials: 'NP',
+      rating: 'N/A',
+      role: 'Waiting for approved riders',
+      pickup: tripData?.origin || 'Pickup Point',
+      dropoff: tripData?.destination || 'Drop-off Point',
+      seats: 0,
+      fareShare: '$0.00',
+      eta: '-',
+      distance: '-'
+    };
+  }
 
   return (
     <div className="relative w-full max-w-md mx-auto h-[844px] bg-slate-950 text-white rounded-[40px] shadow-2xl overflow-hidden border-8 border-slate-900 flex flex-col font-sans select-none">
@@ -203,24 +355,26 @@ export default function DriverTripView({ onBackToDashboard }) {
               <div className="flex items-center justify-between p-3.5 bg-slate-800/40 rounded-2xl border border-slate-800/80">
                 <div className="flex items-center gap-3">
                   <div className="w-12 h-12 rounded-full bg-gradient-to-br from-teal-500 to-blue-600 flex items-center justify-center text-white font-black text-sm shadow-md border border-slate-700/50">
-                    {passenger.avatarInitials}
+                    {activePassenger.avatarInitials}
                   </div>
                   <div>
-                    <h3 className="font-bold text-sm text-slate-100 flex items-center gap-1.5">
-                      {passenger.name}
-                      <span className="text-xs bg-slate-900 px-2 py-0.5 rounded text-teal-400 font-semibold border border-teal-500/20">
-                        {passenger.rating} ★
-                      </span>
+                    <h3 className="font-bold text-sm text-slate-100 flex items-center gap-1.5 font-sans">
+                      {activePassenger.name}
+                      {activePassenger.rating !== 'N/A' && (
+                        <span className="text-xs bg-slate-900 px-2 py-0.5 rounded text-teal-400 font-semibold border border-teal-500/20">
+                          {activePassenger.rating} ★
+                        </span>
+                      )}
                     </h3>
-                    <p className="text-xs text-slate-400">{passenger.role}</p>
+                    <p className="text-xs text-slate-400">{activePassenger.role}</p>
                   </div>
                 </div>
                 
-                <div className="text-right">
+                <div className="text-right font-sans">
                   <span className="text-xs bg-teal-500/10 text-teal-400 font-bold px-2.5 py-1 rounded-full border border-teal-500/20">
-                    {passenger.seats} Seats Booked
+                    {activePassenger.seats} Seats Booked
                   </span>
-                  <div className="text-xs text-slate-400 mt-1 font-semibold">Share: {passenger.fareShare}</div>
+                  <div className="text-xs text-slate-400 mt-1 font-semibold">Share: {activePassenger.fareShare}</div>
                 </div>
               </div>
 
@@ -233,14 +387,14 @@ export default function DriverTripView({ onBackToDashboard }) {
                 <div className="relative">
                   <div className="absolute -left-[20px] top-1.5 w-2 h-2 rounded-full bg-blue-500 ring-4 ring-blue-500/20" />
                   <div className="text-xs font-semibold text-blue-400 uppercase tracking-wider">Pickup Point</div>
-                  <div className="text-sm font-bold text-slate-200 truncate">{passenger.pickup}</div>
+                  <div className="text-sm font-bold text-slate-200 truncate">{activePassenger.pickup}</div>
                 </div>
 
                 {/* Dropoff node */}
                 <div className="relative">
                   <div className="absolute -left-[20px] top-1.5 w-2 h-2 rounded-full bg-emerald-500 ring-4 ring-emerald-500/20" />
                   <div className="text-xs font-semibold text-emerald-400 uppercase tracking-wider">Drop-off Destination</div>
-                  <div className="text-sm font-bold text-slate-200 truncate">{passenger.dropoff}</div>
+                  <div className="text-sm font-bold text-slate-200 truncate">{activePassenger.dropoff}</div>
                 </div>
               </div>
             </div>
@@ -279,8 +433,8 @@ export default function DriverTripView({ onBackToDashboard }) {
 
               {/* Trip Metadata Footer */}
               <div className="flex justify-between items-center text-xs text-slate-500 font-semibold px-1 mt-2">
-                <span>Distance: {passenger.distance}</span>
-                <span>Est. Time: {passenger.eta}</span>
+                <span>Distance: {activePassenger.distance}</span>
+                <span>Est. Time: {activePassenger.eta}</span>
               </div>
             </div>
           </>
@@ -304,11 +458,11 @@ export default function DriverTripView({ onBackToDashboard }) {
               <div className="grid grid-cols-3 gap-2 bg-slate-800/40 border border-slate-800 p-4 rounded-2xl">
                 <div>
                   <div className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">Earned</div>
-                  <div className="text-base font-bold text-teal-400 mt-0.5">{passenger.fareShare}</div>
+                  <div className="text-base font-bold text-teal-400 mt-0.5">{activePassenger.fareShare}</div>
                 </div>
                 <div className="border-x border-slate-700/50">
                   <div className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">Distance</div>
-                  <div className="text-base font-bold text-slate-200 mt-0.5">{passenger.distance}</div>
+                  <div className="text-base font-bold text-slate-200 mt-0.5">{activePassenger.distance}</div>
                 </div>
                 <div>
                   <div className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">Duration</div>
@@ -318,7 +472,7 @@ export default function DriverTripView({ onBackToDashboard }) {
 
               {/* Rating Teaser */}
               <div className="text-center p-3 bg-slate-800/20 rounded-xl border border-slate-800/50 text-xs text-slate-400">
-                You will be able to rate <span className="text-slate-200 font-bold">{passenger.name}</span> in the passenger moderation panel.
+                You will be able to rate <span className="text-slate-200 font-bold">{activePassenger.name}</span> in the passenger moderation panel.
               </div>
             </div>
 
@@ -330,12 +484,14 @@ export default function DriverTripView({ onBackToDashboard }) {
                 Back to Dashboard
               </button>
 
-              <button
-                onClick={handleResetDemo}
-                className="w-full py-2 bg-slate-950 text-slate-500 hover:text-slate-400 text-xs font-semibold rounded-lg hover:underline transition-all"
-              >
-                Restart Demo Trip
-              </button>
+              {isDemo && (
+                <button
+                  onClick={handleResetDemo}
+                  className="w-full py-2 bg-slate-950 text-slate-500 hover:text-slate-400 text-xs font-semibold rounded-lg hover:underline transition-all"
+                >
+                  Restart Demo Trip
+                </button>
+              )}
             </div>
           </div>
         )}
