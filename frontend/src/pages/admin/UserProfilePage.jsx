@@ -9,10 +9,24 @@ import {
   updateDoc,
   where,
 } from 'firebase/firestore';
-import { db } from '../../firebase';
+import { auth, db } from '../../firebase';
 import { FIRESTORE_COLLECTIONS } from '../../firestoreModel';
 import { useSuspension } from '../../hooks/useSuspension';
 import SuspensionModal from '../../components/admin/SuspensionModal';
+
+async function fetchEnrichedProfile(userId) {
+  try {
+    const token = await auth.currentUser?.getIdToken();
+    if (!token) return null;
+    const res = await fetch(`/api/admin/users/${userId}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -639,15 +653,30 @@ export default function UserProfilePage({ userId, onBack }) {
       },
     });
 
-  // Load profile
+  // Load profile — fall back to backend API to fill in fields missing from Firestore
+  // (e.g. admin accounts manually created with only role: "Admin")
   useEffect(() => {
     (async () => {
       try {
         const snap = await getDoc(doc(db, FIRESTORE_COLLECTIONS.users, userId));
-        if (snap.exists()) {
-          setProfile({ id: snap.id, ...snap.data() });
-        } else {
+        if (!snap.exists()) {
           setError('User not found.');
+          return;
+        }
+        const firestoreProfile = { id: snap.id, ...snap.data() };
+        setProfile(firestoreProfile);
+
+        // If key display fields are missing, enrich from backend (Firebase Admin SDK)
+        if (!firestoreProfile.email || !firestoreProfile.createdAt) {
+          const enriched = await fetchEnrichedProfile(userId);
+          if (enriched) {
+            setProfile((prev) => ({
+              ...prev,
+              email: prev.email || enriched.email || prev.email,
+              displayName: prev.displayName || enriched.displayName || prev.displayName,
+              createdAt: prev.createdAt || enriched.createdAt,
+            }));
+          }
         }
       } catch (err) {
         setError(err.message);
