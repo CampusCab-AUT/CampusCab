@@ -8,6 +8,7 @@ const bookingRoutes = require('./routes/bookingRoutes');
 const messageRoutes = require('./routes/messageRoutes');
 const reportRoutes = require('./routes/reportRoutes');
 const userRoutes = require('./routes/userRoutes');
+const auditLogRoutes = require('./routes/auditLogRoutes');
 
 const app = express();
 
@@ -21,6 +22,7 @@ app.use('/api/bookings', bookingRoutes);
 app.use('/api/messages', messageRoutes);
 app.use('/api/admin/reports', reportRoutes);
 app.use('/api/admin/users', userRoutes);
+app.use('/api/admin/audit-logs', auditLogRoutes);
 
 app.get('/', (req, res) => {
   res.json({ message: 'CampusCab API is running' });
