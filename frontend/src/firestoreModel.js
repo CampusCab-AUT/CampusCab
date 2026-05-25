@@ -29,6 +29,8 @@ export const TRIP_STATUS = {
   active: 'active',
   full: 'full',
   cancelled: 'cancelled',
+  inProgress: 'in_progress',
+  completed: 'completed',
 };
 
 /**

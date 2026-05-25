@@ -539,7 +539,7 @@ function formatTripDeparture(departureTime) {
   });
 }
 
-function DriverDashboard() {
+function DriverDashboard({ onOpenLiveTrip }) {
   const [trips, setTrips] = useState([]);
   const [requests, setRequests] = useState([]);
   const [notifications, setNotifications] = useState([]);
@@ -695,7 +695,11 @@ function DriverDashboard() {
       trips
         .filter((trip) => {
           const status = (trip.status || TRIP_STATUS.active).toLowerCase();
-          return status === TRIP_STATUS.active || status === TRIP_STATUS.full;
+          return (
+            status === TRIP_STATUS.active ||
+            status === TRIP_STATUS.full ||
+            status === 'in_progress'
+          );
         })
         .sort((a, b) => getTripTimeValue(b) - getTripTimeValue(a)),
     [trips],
@@ -1501,12 +1505,28 @@ function DriverDashboard() {
                           textTransform: 'uppercase',
                           padding: '6px 10px',
                           borderRadius: radius.pill,
-                          backgroundColor: isFull ? 'rgba(180, 83, 9, 0.12)' : 'rgba(21, 128, 61, 0.12)',
-                          color: isFull ? colors.warning : colors.success,
-                          border: `1px solid ${isFull ? 'rgba(180, 83, 9, 0.25)' : 'rgba(21, 128, 61, 0.25)'}`,
+                          backgroundColor: isFull 
+                            ? 'rgba(180, 83, 9, 0.12)' 
+                            : trip.status === 'in_progress'
+                              ? 'rgba(16, 185, 129, 0.12)'
+                              : 'rgba(21, 128, 61, 0.12)',
+                          color: isFull 
+                            ? colors.warning 
+                            : trip.status === 'in_progress'
+                              ? '#10b981'
+                              : colors.success,
+                          border: `1px solid ${isFull 
+                            ? 'rgba(180, 83, 9, 0.25)' 
+                            : trip.status === 'in_progress'
+                              ? 'rgba(16, 185, 129, 0.25)'
+                              : 'rgba(21, 128, 61, 0.25)'}`,
                         }}
                       >
-                        {isFull ? 'Full' : trip.status || TRIP_STATUS.active}
+                        {isFull 
+                          ? 'Full' 
+                          : trip.status === 'in_progress'
+                            ? 'In Progress'
+                            : trip.status || TRIP_STATUS.active}
                       </span>
                     </div>
                   </div>
@@ -1615,70 +1635,112 @@ function DriverDashboard() {
                       alignItems: 'center',
                     }}
                   >
-                    <button
-                      type="button"
-                      onClick={() => setSelectedTripId(trip.id)}
-                      style={{
-                        flex: 1,
-                        border: 'none',
-                        borderRadius: radius.pill,
-                        padding: '12px 18px',
-                        fontSize: '0.9rem',
-                        fontWeight: 800,
-                        cursor: 'pointer',
-                        background: colors.accentGradient,
-                        color: '#fff',
-                        boxShadow: '0 8px 20px -6px rgba(15, 118, 110, 0.4)',
-                        transition: 'transform 0.15s ease, box-shadow 0.15s ease',
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        gap: '8px',
-                      }}
-                      onMouseEnter={(e) => {
-                        e.currentTarget.style.transform = 'translateY(-1px)';
-                        e.currentTarget.style.boxShadow = '0 12px 28px -6px rgba(15, 118, 110, 0.5)';
-                      }}
-                      onMouseLeave={(e) => {
-                        e.currentTarget.style.transform = '';
-                        e.currentTarget.style.boxShadow = '0 8px 20px -6px rgba(15, 118, 110, 0.4)';
-                      }}
-                    >
-                      <span>View passengers</span>
-                      <span aria-hidden="true">→</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setTripToCancel(trip)}
-                      disabled={isCancelling}
-                      title="Cancel trip"
-                      aria-label="Cancel trip"
-                      style={{
-                        flexShrink: 0,
-                        width: '40px',
-                        height: '40px',
-                        borderRadius: '50%',
-                        border: '1px solid rgba(220, 38, 38, 0.25)',
-                        backgroundColor: '#fff',
-                        color: colors.danger,
-                        cursor: isCancelling ? 'wait' : 'pointer',
-                        opacity: isCancelling ? 0.6 : 1,
-                        fontSize: '16px',
-                        fontWeight: 700,
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        transition: 'background-color 0.15s ease',
-                      }}
-                      onMouseEnter={(e) => {
-                        e.currentTarget.style.backgroundColor = 'rgba(220, 38, 38, 0.08)';
-                      }}
-                      onMouseLeave={(e) => {
-                        e.currentTarget.style.backgroundColor = '#fff';
-                      }}
-                    >
-                      {isCancelling ? '…' : '✕'}
-                    </button>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', width: '100%' }}>
+                      <div style={{ display: 'flex', gap: '8px', width: '100%' }}>
+                        <button
+                          type="button"
+                          onClick={() => onOpenLiveTrip?.(trip.id === 'demo-trip-1' ? 'demo' : trip.id)}
+                          style={{
+                            flex: 1,
+                            border: 'none',
+                            borderRadius: radius.pill,
+                            padding: '12px 18px',
+                            fontSize: '0.9rem',
+                            fontWeight: 800,
+                            cursor: 'pointer',
+                            background: trip.status === 'in_progress' ? '#10b981' : colors.accentGradient,
+                            color: '#fff',
+                            boxShadow: trip.status === 'in_progress' 
+                              ? '0 8px 20px -6px rgba(16, 185, 129, 0.4)' 
+                              : '0 8px 20px -6px rgba(15, 118, 110, 0.4)',
+                            transition: 'transform 0.15s ease, box-shadow 0.15s ease',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: '8px',
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.transform = 'translateY(-1px)';
+                            e.currentTarget.style.boxShadow = trip.status === 'in_progress' 
+                              ? '0 12px 28px -6px rgba(16, 185, 129, 0.5)' 
+                              : '0 12px 28px -6px rgba(15, 118, 110, 0.5)';
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.transform = '';
+                            e.currentTarget.style.boxShadow = trip.status === 'in_progress' 
+                              ? '0 8px 20px -6px rgba(16, 185, 129, 0.4)' 
+                              : '0 8px 20px -6px rgba(15, 118, 110, 0.4)';
+                          }}
+                        >
+                          <span>{trip.status === 'in_progress' ? '⚡ Active: Manage Live Trip' : 'Start / Manage Live Trip'}</span>
+                        </button>
+                      </div>
+                      <div style={{ display: 'flex', gap: '8px', width: '100%', alignItems: 'center' }}>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedTripId(trip.id)}
+                          style={{
+                            flex: 1,
+                            border: `1px solid ${colors.borderStrong}`,
+                            borderRadius: radius.pill,
+                            padding: '10px 18px',
+                            fontSize: '0.86rem',
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                            background: '#fff',
+                            color: colors.text,
+                            transition: 'transform 0.15s ease, background-color 0.15s ease',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: '6px',
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.transform = 'translateY(-1px)';
+                            e.currentTarget.style.backgroundColor = colors.surfaceMuted;
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.transform = '';
+                            e.currentTarget.style.backgroundColor = '#fff';
+                          }}
+                        >
+                          <span>View passengers</span>
+                          <span aria-hidden="true">→</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setTripToCancel(trip)}
+                          disabled={isCancelling}
+                          title="Cancel trip"
+                          aria-label="Cancel trip"
+                          style={{
+                            flexShrink: 0,
+                            width: '38px',
+                            height: '38px',
+                            borderRadius: '50%',
+                            border: '1px solid rgba(220, 38, 38, 0.25)',
+                            backgroundColor: '#fff',
+                            color: colors.danger,
+                            cursor: isCancelling ? 'wait' : 'pointer',
+                            opacity: isCancelling ? 0.6 : 1,
+                            fontSize: '15px',
+                            fontWeight: 700,
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            transition: 'background-color 0.15s ease',
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.backgroundColor = 'rgba(220, 38, 38, 0.08)';
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.backgroundColor = '#fff';
+                          }}
+                        >
+                          {isCancelling ? '…' : '✕'}
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 </article>
               );
