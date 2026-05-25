@@ -19,6 +19,8 @@ import SearchTrips from './SearchTrips';
 import TripDetails from './TripDetails';
 import LeaveRatingModal from '../components/LeaveRatingModal';
 import ReportUserModal from '../components/ReportUserModal';
+import ChatWindow from '../components/ChatWindow';
+import { canViewChat } from '../utils/chatPermissions';
 
 function formatDeparture(departureTime) {
   if (!departureTime) return 'Departure time unavailable';
@@ -548,23 +550,42 @@ function PassengerDashboard() {
                         }}>
                           Status: {ride.status === RIDE_REQUEST_STATUS.pending ? 'Pending Approval' : 'Approved'}
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => setRideToCancel(ride)}
-                          disabled={cancellingRideId === ride.id}
-                          style={{
-                            marginTop: '12px',
-                            border: '1px solid #fecaca',
-                            borderRadius: '8px',
-                            backgroundColor: '#fff',
-                            color: '#b91c1c',
-                            cursor: cancellingRideId === ride.id ? 'wait' : 'pointer',
-                            fontWeight: 700,
-                            padding: '9px 12px',
-                          }}
-                        >
-                          {cancellingRideId === ride.id ? 'Cancelling...' : 'Cancel Seat'}
-                        </button>
+                        <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
+                          <button
+                            type="button"
+                            onClick={() => setRideToCancel(ride)}
+                            disabled={cancellingRideId === ride.id}
+                            style={{
+                              border: '1px solid #fecaca',
+                              borderRadius: '8px',
+                              backgroundColor: '#fff',
+                              color: '#b91c1c',
+                              cursor: cancellingRideId === ride.id ? 'wait' : 'pointer',
+                              fontWeight: 700,
+                              padding: '9px 12px',
+                            }}
+                          >
+                            {cancellingRideId === ride.id ? 'Cancelling...' : 'Cancel Seat'}
+                          </button>
+
+                          {canViewChat(ride.status) && (
+                            <button
+                              type="button"
+                              onClick={() => setChatModalRide(ride)}
+                              style={{
+                                border: '1px solid #0ea5e9',
+                                borderRadius: '8px',
+                                backgroundColor: '#0ea5e9',
+                                color: '#fff',
+                                cursor: 'pointer',
+                                fontWeight: 700,
+                                padding: '9px 12px',
+                              }}
+                            >
+                              Chat with Driver
+                            </button>
+                          )}
+                        </div>
                       </li>
                     ))}
                   </ul>
@@ -644,6 +665,14 @@ function PassengerDashboard() {
                   tripId={reportModalRide.tripId}
                   onClose={() => setReportModalRide(null)}
                   onReported={() => setReportedRideIds(prev => [...prev, reportModalRide.id])}
+                />
+              )}
+
+              {chatModalRide && (
+                <ChatWindow
+                  rideRequest={chatModalRide}
+                  currentUser={auth.currentUser}
+                  onClose={() => setChatModalRide(null)}
                 />
               )}
             </>
