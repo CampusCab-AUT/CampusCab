@@ -1,9 +1,13 @@
 import React, { useState } from 'react';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
-import { db } from '../firebase';
+import { db, auth } from '../firebase';
 import { FIRESTORE_COLLECTIONS } from '../firestoreModel';
 
-const VIOLATION_TYPES = ['Harassment', 'Hate Speech', 'Inappropriate Content', 'Spam', 'Other'];
+const VIOLATION_TYPES = [
+  'No Show', 'Unsafe Driving', 'Route Deviation', 'Rider Misconduct',
+  'Payment Dispute', 'Late Pickup', 'Trip Fraud',
+  'Harassment', 'Hate Speech', 'Inappropriate Content', 'Spam', 'Other',
+];
 
 function ReportUserModal({ reportedUserId, reportedUserName, reporterId, tripId, onClose, onReported }) {
   const [violationType, setViolationType] = useState('');
@@ -27,6 +31,7 @@ function ReportUserModal({ reportedUserId, reportedUserName, reporterId, tripId,
         reportedUserId,
         reportedUserName: reportedUserName || reportedUserId,
         reporterId,
+        reporterName: auth?.currentUser?.displayName || auth?.currentUser?.email || reporterId,
         violationType,
         reason: reason.trim(),
         status: 'New',

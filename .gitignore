@@ -74,3 +74,4 @@ backend/package-lock.json
 backend/functions/package-lock.json
 /package-lock.json
 .mcp.json
+firestore.rules

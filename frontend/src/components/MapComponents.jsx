@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { MapContainer, TileLayer, Marker, Polyline, useMap } from 'react-leaflet';
 import L from 'leaflet';
-import { inputs, surfaces, colors, radius, typography } from '../theme';
+import { inputs, surfaces, colors, radius, typography, pills, spacing } from '../theme';
 
 // Fix Leaflet marker icons in Vite
 import markerIcon2x from 'leaflet/dist/images/marker-icon-2x.png';
@@ -21,12 +21,27 @@ export const AUT_CAMPUSES = [
   { display_name: "AUT South Campus (640 Great South Rd, Manukau)", lat: -36.9841, lon: 174.8805 }
 ];
 
-export function AddressSearch({ label, onSelect, placeholder }) {
+function iconForSavedLabel(label) {
+  const lower = (label || '').toLowerCase();
+  if (lower === 'home') return '🏠';
+  if (lower === 'campus') return '🎓';
+  if (lower === 'work') return '💼';
+  return '📍';
+}
+
+export function AddressSearch({ label, onSelect, placeholder, savedAddresses = [] }) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
   const [focused, setFocused] = useState(false);
   const debounceTimer = useRef(null);
+
+  const pickSaved = (addr) => {
+    setQuery(addr.name);
+    setResults([]);
+    setFocused(false);
+    onSelect({ name: addr.name, lat: parseFloat(addr.lat), lon: parseFloat(addr.lon) });
+  };
 
   const search = (text) => {
     setQuery(text);
@@ -77,6 +92,37 @@ export function AddressSearch({ label, onSelect, placeholder }) {
   return (
     <div style={{ position: 'relative', width: '100%' }}>
       <label style={{ ...inputs.label }}>{label}</label>
+      {savedAddresses && savedAddresses.length > 0 && (
+        <div
+          style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: spacing?.xs || '6px',
+            marginBottom: '8px',
+          }}
+        >
+          {savedAddresses.map((addr) => (
+            <button
+              key={addr.id || addr.label}
+              type="button"
+              onClick={() => pickSaved(addr)}
+              title={`Use saved address: ${addr.name}`}
+              style={{
+                ...pills.base,
+                ...pills.accent,
+                cursor: 'pointer',
+                border: 'none',
+                textTransform: 'none',
+                letterSpacing: 0,
+                fontSize: '0.78rem',
+                padding: '6px 12px',
+              }}
+            >
+              {iconForSavedLabel(addr.label)} {addr.label}
+            </button>
+          ))}
+        </div>
+      )}
       <input
         type="text"
         placeholder={placeholder}

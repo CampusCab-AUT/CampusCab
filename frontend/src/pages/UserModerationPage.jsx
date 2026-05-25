@@ -1,118 +1,66 @@
 import { useState, useEffect } from 'react';
 import {
-  addDoc,
   collection,
   doc,
   getDoc,
   getDocs,
   orderBy,
   query,
-  serverTimestamp,
   updateDoc,
   where,
 } from 'firebase/firestore';
-import { auth, db } from '../firebase';
+import { db } from '../firebase';
 import { FIRESTORE_COLLECTIONS } from '../firestoreModel';
+import { useSuspension } from '../hooks/useSuspension';
+import SuspensionModal from '../components/admin/SuspensionModal';
 
 const STATUS_OPTIONS = ['New', 'In-Progress', 'Resolved'];
 
 const STATUS_COLORS = {
-  New: { background: '#fff3cd', color: '#856404' },
+  New:           { background: '#fff3cd', color: '#856404' },
   'In-Progress': { background: '#cfe2ff', color: '#084298' },
-  Resolved: { background: '#d1e7dd', color: '#0a3622' },
+  Resolved:      { background: '#d1e7dd', color: '#0a3622' },
 };
 
-const DURATION_OPTIONS = ['24 hours', '7 days', 'Permanent'];
-
-function SuspensionModal({ userName, onConfirm, onCancel, loading }) {
-  const [duration, setDuration] = useState('24 hours');
-  const [reason, setReason] = useState('');
-
-  return (
-    <div style={{
-      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
-      display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000,
-    }}>
-      <div style={{
-        background: 'white', borderRadius: 12, padding: 32, width: 460,
-        boxShadow: '0 8px 32px rgba(0,0,0,0.2)',
-      }}>
-        <h3 style={{ marginTop: 0, color: '#dc3545' }}>Suspend Account</h3>
-        <p style={{ color: '#444', marginBottom: 20 }}>
-          You are about to suspend <strong>{userName}</strong>. This will immediately terminate their session.
-        </p>
-
-        <label style={{ display: 'block', fontWeight: 600, marginBottom: 6 }}>Suspension Duration</label>
-        <select
-          value={duration}
-          onChange={(e) => setDuration(e.target.value)}
-          style={{ width: '100%', padding: '8px 12px', borderRadius: 6, border: '1px solid #ccc', marginBottom: 16, fontSize: 14 }}
-        >
-          {DURATION_OPTIONS.map((d) => <option key={d} value={d}>{d}</option>)}
-        </select>
-
-        <label style={{ display: 'block', fontWeight: 600, marginBottom: 6 }}>
-          Reason <span style={{ color: '#dc3545' }}>*</span>
-        </label>
-        <textarea
-          value={reason}
-          onChange={(e) => setReason(e.target.value)}
-          placeholder="Enter a mandatory reason for this suspension..."
-          rows={4}
-          style={{
-            width: '100%', padding: '8px 12px', borderRadius: 6,
-            border: `1.5px solid ${reason ? '#ccc' : '#dc3545'}`,
-            fontSize: 14, resize: 'vertical', boxSizing: 'border-box',
-          }}
-        />
-        {!reason && <p style={{ color: '#dc3545', fontSize: 12, margin: '4px 0 0' }}>Reason is required to confirm.</p>}
-
-        <div style={{ display: 'flex', gap: 12, marginTop: 20, justifyContent: 'flex-end' }}>
-          <button
-            onClick={onCancel}
-            disabled={loading}
-            style={{ padding: '10px 20px', borderRadius: 6, border: '1px solid #ccc', background: 'white', cursor: 'pointer', fontSize: 14 }}
-          >
-            Cancel
-          </button>
-          <button
-            onClick={() => onConfirm(duration, reason)}
-            disabled={!reason.trim() || loading}
-            style={{
-              padding: '10px 20px', borderRadius: 6, border: 'none',
-              background: reason.trim() ? '#dc3545' : '#f5a0a8',
-              color: 'white', cursor: reason.trim() ? 'pointer' : 'not-allowed',
-              fontSize: 14, fontWeight: 600,
-            }}
-          >
-            {loading ? 'Suspending...' : 'Confirm Suspension'}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 export default function UserModerationPage({ userId, userName, onBack }) {
-  const [reports, setReports] = useState([]);
+  const [reports, setReports]       = useState([]);
   const [userProfile, setUserProfile] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [updating, setUpdating] = useState(null);
-  const [showModal, setShowModal] = useState(false);
-  const [suspending, setSuspending] = useState(false);
+  const [loading, setLoading]       = useState(true);
+  const [error, setError]           = useState(null);
+  const [updating, setUpdating]     = useState(null);
+
+  const isSuspended = userProfile?.accountStatus === 'Suspended';
+
+  const { showModal, setShowModal, suspending, unsuspending, handleSuspend, handleUnsuspend } =
+    useSuspension(userId, userName, {
+      onSuccess: ({ action, duration, reason }) => {
+        setUserProfile((prev) => ({
+          ...prev,
+          accountStatus: action === 'SUSPEND' ? 'Suspended' : 'Active',
+          suspensionReason:   action === 'SUSPEND' ? reason   : null,
+          suspensionDuration: action === 'SUSPEND' ? duration : null,
+          suspendedAt:        action === 'SUSPEND' ? new Date().toISOString() : null,
+        }));
+      },
+    });
 
   useEffect(() => {
     const loadData = async () => {
       try {
-        const reportsSnap = await getDocs(query(
+        const reportsSnap = await getDocs(
+          query(
+            collection(db, FIRESTORE_COLLECTIONS.reports),
+            where('reportedUserId', '==', userId),
+            orderBy('createdAt', 'desc')
+          )
+        ).catch(() => getDocs(query(
           collection(db, FIRESTORE_COLLECTIONS.reports),
-          where('reportedUserId', '==', userId),
-          orderBy('createdAt', 'desc')
-        ));
-        setReports(reportsSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
+          where('reportedUserId', '==', userId)
+        )));
 
         const userSnap = await getDoc(doc(db, FIRESTORE_COLLECTIONS.users, userId));
+
+        setReports(reportsSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
         if (userSnap.exists()) {
           setUserProfile({ id: userSnap.id, ...userSnap.data() });
         }
@@ -126,8 +74,7 @@ export default function UserModerationPage({ userId, userName, onBack }) {
   }, [userId]);
 
   const handleStatusChange = async (reportId, newStatus) => {
-    const valid = ['New', 'In-Progress', 'Resolved'];
-    if (!valid.includes(newStatus)) return;
+    if (!STATUS_OPTIONS.includes(newStatus)) return;
     setUpdating(reportId);
     try {
       await updateDoc(doc(db, FIRESTORE_COLLECTIONS.reports, reportId), { status: newStatus });
@@ -138,77 +85,6 @@ export default function UserModerationPage({ userId, userName, onBack }) {
       setUpdating(null);
     }
   };
-
-  const handleSuspend = async (duration, reason) => {
-    setSuspending(true);
-    try {
-      const adminId = auth.currentUser?.uid;
-
-      await updateDoc(doc(db, FIRESTORE_COLLECTIONS.users, userId), {
-        accountStatus: 'Suspended',
-        suspensionReason: reason,
-        suspensionDuration: duration,
-        suspendedAt: new Date().toISOString(),
-        suspendedBy: adminId,
-      });
-
-      await addDoc(collection(db, FIRESTORE_COLLECTIONS.auditLogs), {
-        adminId,
-        targetUserId: userId,
-        action: 'SUSPEND',
-        reason,
-        duration,
-        timestamp: serverTimestamp(),
-      });
-
-      setUserProfile((prev) => ({
-        ...prev,
-        accountStatus: 'Suspended',
-        suspensionReason: reason,
-        suspensionDuration: duration,
-      }));
-      setShowModal(false);
-    } catch (err) {
-      alert('Failed to suspend user: ' + err.message);
-    } finally {
-      setSuspending(false);
-    }
-  };
-
-  const handleUnsuspend = async () => {
-    if (!window.confirm(`Reinstate ${userName}'s account?`)) return;
-    try {
-      const adminId = auth.currentUser?.uid;
-
-      await updateDoc(doc(db, FIRESTORE_COLLECTIONS.users, userId), {
-        accountStatus: 'Active',
-        suspensionReason: null,
-        suspensionDuration: null,
-        suspendedAt: null,
-        suspendedBy: null,
-      });
-
-      await addDoc(collection(db, FIRESTORE_COLLECTIONS.auditLogs), {
-        adminId,
-        targetUserId: userId,
-        action: 'UNSUSPEND',
-        reason: 'Manual reinstatement by admin',
-        duration: null,
-        timestamp: serverTimestamp(),
-      });
-
-      setUserProfile((prev) => ({
-        ...prev,
-        accountStatus: 'Active',
-        suspensionReason: null,
-        suspensionDuration: null,
-      }));
-    } catch (err) {
-      alert('Failed to unsuspend user: ' + err.message);
-    }
-  };
-
-  const isSuspended = userProfile?.accountStatus === 'Suspended';
 
   return (
     <div style={{ padding: 24 }}>
@@ -223,7 +99,7 @@ export default function UserModerationPage({ userId, userName, onBack }) {
 
       <button
         onClick={onBack}
-        style={{ marginBottom: 20, padding: '8px 16px', cursor: 'pointer', borderRadius: 6, border: '1px solid #ccc', background: 'white' }}
+        style={{ marginBottom: 20, padding: '8px 16px', cursor: 'pointer', borderRadius: 8, border: '1px solid #e2e8f0', background: 'white', fontWeight: 600, fontSize: 13 }}
       >
         ← Back to Dashboard
       </button>
@@ -231,61 +107,97 @@ export default function UserModerationPage({ userId, userName, onBack }) {
       {/* Header row */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12, marginBottom: 8 }}>
         <div>
-          <h2 style={{ marginTop: 0, marginBottom: 4 }}>Moderation: {userName}</h2>
-          <p style={{ color: '#666', margin: 0 }}>User ID: {userId}</p>
+          <h2 style={{ marginTop: 0, marginBottom: 4, fontSize: 20, fontWeight: 800, color: '#0f172a' }}>
+            Moderation: {userName}
+          </h2>
+          <p style={{ color: '#64748b', margin: 0, fontSize: 13, fontFamily: 'monospace' }}>
+            UID: {userId}
+          </p>
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           {isSuspended && (
-            <span style={{ background: '#f8d7da', color: '#842029', padding: '6px 14px', borderRadius: 20, fontWeight: 700, fontSize: 13 }}>
+            <span style={{
+              background: '#fee2e2', color: '#991b1b',
+              padding: '6px 14px', borderRadius: 20, fontWeight: 700, fontSize: 13,
+              border: '1px solid #fecaca',
+            }}>
               SUSPENDED — {userProfile.suspensionDuration}
             </span>
           )}
-          {userProfile && (
-            isSuspended ? (
-              <button
-                onClick={handleUnsuspend}
-                style={{ padding: '10px 20px', borderRadius: 6, border: 'none', background: '#198754', color: 'white', fontWeight: 700, cursor: 'pointer', fontSize: 14 }}
-              >
-                Unsuspend Account
-              </button>
-            ) : (
-              <button
-                onClick={() => setShowModal(true)}
-                style={{ padding: '10px 20px', borderRadius: 6, border: 'none', background: '#dc3545', color: 'white', fontWeight: 700, cursor: 'pointer', fontSize: 14 }}
-              >
-                Suspend Account
-              </button>
-            )
+          {isSuspended ? (
+            <button
+              onClick={handleUnsuspend}
+              disabled={unsuspending}
+              style={{
+                padding: '10px 20px', borderRadius: 8, border: 'none',
+                background: 'linear-gradient(135deg, #059669, #10b981)',
+                color: 'white', fontWeight: 700, cursor: unsuspending ? 'not-allowed' : 'pointer', fontSize: 14,
+                boxShadow: '0 4px 12px rgba(5,150,105,0.3)',
+              }}
+            >
+              {unsuspending ? 'Reinstating…' : '✓ Unsuspend Account'}
+            </button>
+          ) : (
+            <button
+              onClick={() => setShowModal(true)}
+              style={{
+                padding: '10px 20px', borderRadius: 8, border: 'none',
+                background: 'linear-gradient(135deg, #dc2626, #b91c1c)',
+                color: 'white', fontWeight: 700, cursor: 'pointer', fontSize: 14,
+                boxShadow: '0 4px 12px rgba(220,38,38,0.3)',
+              }}
+            >
+              Suspend Account
+            </button>
           )}
         </div>
       </div>
 
-      {isSuspended && userProfile.suspensionReason && (
-        <div style={{ background: '#f8d7da', border: '1px solid #f5c2c7', borderRadius: 8, padding: '12px 16px', marginBottom: 20 }}>
+      {isSuspended && userProfile?.suspensionReason && (
+        <div style={{
+          background: '#fff5f5', border: '1px solid #fecaca',
+          borderRadius: 10, padding: '12px 16px', marginBottom: 20,
+          fontSize: 14, color: '#7f1d1d',
+        }}>
           <strong>Suspension reason:</strong> {userProfile.suspensionReason}
         </div>
       )}
 
-      {loading && <p>Loading reports...</p>}
-      {error && <p style={{ color: '#dc3545' }}>Error: {error}</p>}
-      {!loading && !error && reports.length === 0 && <p style={{ color: '#666' }}>No reports found for this user.</p>}
+      {loading && <p style={{ color: '#64748b' }}>Loading reports…</p>}
+      {error   && <p style={{ color: '#dc2626' }}>Error: {error}</p>}
+      {!loading && !error && reports.length === 0 && (
+        <div style={{ padding: '40px 24px', textAlign: 'center', color: '#64748b', background: 'white', borderRadius: 12, border: '1px solid #e2e8f0' }}>
+          <div style={{ fontSize: 36, marginBottom: 8 }}>🛡️</div>
+          <div style={{ fontWeight: 700 }}>No reports on file</div>
+          <div style={{ fontSize: 13, marginTop: 4 }}>This user has not been reported.</div>
+        </div>
+      )}
 
       {!loading && !error && reports.length > 0 && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           {reports.map((report) => (
             <div
               key={report.id}
-              style={{ border: '1px solid #dee2e6', borderRadius: 8, padding: 20, background: 'white', boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}
+              style={{
+                border: '1px solid #e2e8f0', borderRadius: 12,
+                padding: '18px 20px', background: 'white',
+                boxShadow: '0 2px 6px rgba(15,23,42,0.05)',
+              }}
             >
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
                 <div>
-                  <span style={{ display: 'inline-block', background: '#6c757d', color: 'white', padding: '2px 10px', borderRadius: 12, fontSize: 12, fontWeight: 600, marginBottom: 8 }}>
+                  <span style={{
+                    display: 'inline-block', background: '#f1f5f9', color: '#475569',
+                    padding: '3px 10px', borderRadius: 12, fontSize: 12, fontWeight: 700, marginBottom: 8,
+                  }}>
                     {report.violationType}
                   </span>
-                  <p style={{ margin: '4px 0', fontWeight: 600 }}>Report Evidence</p>
-                  <p style={{ margin: '4px 0', color: '#444' }}>{report.reason || 'No details provided.'}</p>
-                  <p style={{ margin: '8px 0 0', fontSize: 12, color: '#888' }}>
+                  <p style={{ margin: '4px 0', fontWeight: 600, fontSize: 14, color: '#0f172a' }}>Report Evidence</p>
+                  <p style={{ margin: '4px 0', color: '#475569', fontSize: 13 }}>
+                    {report.reason || 'No details provided.'}
+                  </p>
+                  <p style={{ margin: '8px 0 0', fontSize: 12, color: '#94a3b8' }}>
                     Reported by: {report.reporterId} &nbsp;|&nbsp;
                     {report.createdAt?.toDate
                       ? report.createdAt.toDate().toLocaleString()
@@ -294,14 +206,20 @@ export default function UserModerationPage({ userId, userName, onBack }) {
                 </div>
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <span style={{ padding: '4px 12px', borderRadius: 12, fontSize: 13, fontWeight: 600, ...STATUS_COLORS[report.status] }}>
+                  <span style={{
+                    padding: '4px 12px', borderRadius: 12, fontSize: 13, fontWeight: 600,
+                    ...STATUS_COLORS[report.status],
+                  }}>
                     {report.status}
                   </span>
                   <select
                     value={report.status}
                     disabled={updating === report.id}
                     onChange={(e) => handleStatusChange(report.id, e.target.value)}
-                    style={{ padding: '4px 8px', borderRadius: 6, border: '1px solid #ccc', fontSize: 13, cursor: 'pointer' }}
+                    style={{
+                      padding: '5px 10px', borderRadius: 8, border: '1.5px solid #e2e8f0',
+                      fontSize: 13, cursor: 'pointer', outline: 'none',
+                    }}
                   >
                     {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
                   </select>
