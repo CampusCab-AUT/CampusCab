@@ -36,7 +36,6 @@ function formatDeparture(departureTime) {
  */
 function PassengerDashboard() {
   const [upcomingRides, setUpcomingRides] = useState([]);
-  const [pastRides] = useState([]);
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState('');
@@ -51,6 +50,7 @@ function PassengerDashboard() {
   const [reportModalRide, setReportModalRide] = useState(null);
   const [reportedRideIds, setReportedRideIds] = useState([]);
   const [footageFormState, setFootageFormState] = useState({});
+  const [chatModalRide, setChatModalRide] = useState(null);
 
   useEffect(() => {
     if (!firebaseReady || !auth || !db) {
