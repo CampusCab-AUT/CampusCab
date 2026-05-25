@@ -15,9 +15,10 @@ export const FIRESTORE_COLLECTIONS = {
   notifications: 'notifications',
   pushTokens: 'pushTokens',
   ratings: 'ratings',
-  users: 'users',
   reports: 'reports',
   auditLogs: 'auditLogs',
+  chats: 'chats',
+  calls: 'calls',
 };
 
 /**

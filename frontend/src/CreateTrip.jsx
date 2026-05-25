@@ -11,6 +11,7 @@ import { buttons, colors, inputs, pills, radius, shadows, typography } from './t
 import { FIRESTORE_COLLECTIONS, TRIP_STATUS } from './firestoreModel';
 import useIsDesktop from './hooks/useIsDesktop';
 import { AddressSearch, RouteMap } from './components/MapComponents';
+import useSavedAddresses from './hooks/useSavedAddresses';
 
 function Field({ label, helper, children }) {
   return (
@@ -92,6 +93,7 @@ function CreateTrip() {
   const [recentTrip, setRecentTrip] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const isDesktop = useIsDesktop();
+  const { savedAddresses } = useSavedAddresses();
   /**
    * Validates form inputs and submits the new trip payload to Firestore.
    * Also handles a "demo mode" fallback if Firebase is not connected locally.
@@ -183,15 +185,17 @@ function CreateTrip() {
 
       <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
         <div style={{ display: 'grid', gridTemplateColumns: twoColumns, gap: '12px' }}>
-          <AddressSearch 
-            label="Origin Address" 
-            placeholder="e.g. 123 Main St, North Shore" 
-            onSelect={setOrigin} 
+          <AddressSearch
+            label="Origin Address"
+            placeholder="e.g. 123 Main St, North Shore"
+            onSelect={setOrigin}
+            savedAddresses={savedAddresses}
           />
-          <AddressSearch 
-            label="Destination Address" 
-            placeholder="e.g. AUT City Campus" 
-            onSelect={setDestination} 
+          <AddressSearch
+            label="Destination Address"
+            placeholder="e.g. AUT City Campus"
+            onSelect={setDestination}
+            savedAddresses={savedAddresses}
           />
         </div>
 

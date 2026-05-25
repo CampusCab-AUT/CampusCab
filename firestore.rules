@@ -96,5 +96,15 @@ service cloud.firestore {
     match /auditLogs/{logId} {
       allow read, create: if isAdmin();
     }
+    
+    // Chats — Allow authenticated users to send, receive, and update (for read receipts & emojis)
+    match /chats/{chatId}/messages/{messageId} {
+      allow read, create, update: if request.auth != null;
+    }
+    
+    // Calls (Real-time signaling)
+    match /calls/{callId} {
+      allow read, write: if request.auth != null;
+    }
   }
 }
