@@ -11,6 +11,7 @@ import AdminDashboard from './pages/AdminDashboard';
 import { FIRESTORE_COLLECTIONS } from './firestoreModel';
 import useIsDesktop from './hooks/useIsDesktop';
 import DriverDashboard from './pages/DriverDashboard';
+import DriverAnalytics from './pages/DriverAnalytics';
 import DriverTripView from './components/DriverTripView';
 import PassengerDashboard from './pages/PassengerDashboard';
 import UserProfilePanel from './components/UserProfilePanel';
@@ -464,6 +465,7 @@ function DriverExperience() {
   const [loading, setLoading] = useState(true);
   const [onboardingComplete, setOnboardingComplete] = useState(false);
   const [liveTripId, setLiveTripId] = useState(null);
+  const [driverView, setDriverView] = useState('dashboard');
   const isDesktop = useIsDesktop();
 
   useEffect(() => {
@@ -523,6 +525,71 @@ function DriverExperience() {
     return <DriverTripView tripId={liveTripId} onBackToDashboard={() => setLiveTripId(null)} />;
   }
 
+  const driverTabs = [
+    { id: 'dashboard', label: 'Dashboard', icon: '🚗' },
+    { id: 'analytics', label: 'Analytics', icon: '📈' },
+  ];
+
+  const tabStrip = (
+    <div
+      role="tablist"
+      aria-label="Driver views"
+      style={{
+        display: 'inline-flex',
+        gap: '4px',
+        padding: '4px',
+        borderRadius: radius.pill,
+        background: colors.surfaceMuted,
+        border: `1px solid ${colors.border}`,
+        marginBottom: '4px',
+      }}
+    >
+      {driverTabs.map((tab) => {
+        const isActive = driverView === tab.id;
+        return (
+          <button
+            key={tab.id}
+            role="tab"
+            aria-selected={isActive}
+            type="button"
+            onClick={() => setDriverView(tab.id)}
+            style={{
+              border: 'none',
+              borderRadius: radius.pill,
+              padding: '8px 16px',
+              fontSize: '0.86rem',
+              fontWeight: 800,
+              cursor: 'pointer',
+              background: isActive ? colors.accentGradient : 'transparent',
+              color: isActive ? '#fff' : colors.text,
+              boxShadow: isActive
+                ? '0 8px 18px -8px rgba(15, 118, 110, 0.45)'
+                : 'none',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              transition: 'background 0.15s ease, color 0.15s ease',
+            }}
+          >
+            <span aria-hidden="true">{tab.icon}</span>
+            {tab.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+
+  if (driverView === 'analytics') {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+        {tabStrip}
+        <DriverAnalytics
+          onBackToDashboard={() => setDriverView('dashboard')}
+        />
+      </div>
+    );
+  }
+
   return (
     <div
       style={{
@@ -531,12 +598,13 @@ function DriverExperience() {
         gridTemplateColumns: isDesktop ? 'repeat(2, minmax(0, 1fr))' : '1fr',
       }}
     >
-      <section 
-        style={{ 
-          gridColumn: isDesktop ? '1 / -1' : 'auto', 
-          ...surfaces.card, 
-          padding: '24px', 
-          background: colors.accentGradient, 
+      <div style={{ gridColumn: '1 / -1' }}>{tabStrip}</div>
+      <section
+        style={{
+          gridColumn: isDesktop ? '1 / -1' : 'auto',
+          ...surfaces.card,
+          padding: '24px',
+          background: colors.accentGradient,
           color: 'white', 
           display: 'flex', 
           justifyContent: 'space-between', 
