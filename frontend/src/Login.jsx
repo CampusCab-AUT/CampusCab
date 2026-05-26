@@ -94,7 +94,7 @@ function Login({ onLoginSuccess }) {
         // USER STORY 2, TEST 2: Secure login
         const credential = await signInWithEmailAndPassword(auth, email, password);
         // Fetch user profile to check for admin suspensions
-        const userDoc = await getDoc(doc(db, 'users', credential.user.uid));
+        const userDoc = await getDoc(doc(db, FIRESTORE_COLLECTIONS.users, credential.user.uid));
         const data = userDoc.exists() ? userDoc.data() : {};
         if (data.accountStatus === 'Suspended') {
           await auth.signOut();
