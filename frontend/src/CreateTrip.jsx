@@ -186,6 +186,7 @@ function CreateTrip() {
   const [routeGeoJson, setRouteGeoJson] = useState(null);
   const [departureTime, setDepartureTime] = useState('');
   const [seats, setSeats] = useState(3);
+  const [estimatedDurationMinutes, setEstimatedDurationMinutes] = useState(30);
   const [message, setMessage] = useState('');
   const [recentTrip, setRecentTrip] = useState(null);
   const [recentBatch, setRecentBatch] = useState(null);
@@ -235,6 +236,12 @@ function CreateTrip() {
       return;
     }
 
+    const durationMinutes = parseInt(estimatedDurationMinutes, 10);
+    if (!Number.isInteger(durationMinutes) || durationMinutes <= 0) {
+      setMessage('Error: Estimated trip duration must be a positive number of minutes.');
+      return;
+    }
+
     if (womenOnly && driverGender !== 'Female') {
       setMessage('Error: Only female drivers can create women-only trips.');
       return;
@@ -269,6 +276,8 @@ function CreateTrip() {
       destinationLocation: { lat: destination.lat, lon: destination.lon },
       routeGeoJson: JSON.stringify(routeGeoJson),
       departureTime: departureIso,
+      estimatedDurationMinutes: durationMinutes,
+      etaAt: new Date(new Date(departureIso).getTime() + durationMinutes * 60000).toISOString(),
       seats: parseInt(seats, 10),
       availableSeats: parseInt(seats, 10),
       status: TRIP_STATUS.active,
@@ -403,6 +412,19 @@ function CreateTrip() {
             />
           </Field>
         </div>
+
+        <Field
+          label="Estimated trip duration (minutes)"
+          helper="Used to send passengers a safety check-in 10 minutes after the estimated arrival."
+        >
+          <StyledInput
+            type="number"
+            min="1"
+            value={estimatedDurationMinutes}
+            onChange={(e) => setEstimatedDurationMinutes(e.target.value)}
+            required
+          />
+        </Field>
 
         {/* ─── Recurring trip panel ─────────────────────────────── */}
         <div

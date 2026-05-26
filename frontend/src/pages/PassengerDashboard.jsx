@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import {
+  addDoc,
   arrayUnion,
   collection,
   doc,
@@ -13,7 +14,14 @@ import {
   writeBatch,
 } from 'firebase/firestore';
 import { auth, db, firebaseReady } from '../firebase';
-import { FIRESTORE_COLLECTIONS, NOTIFICATION_STATUS, RIDE_REQUEST_STATUS } from '../firestoreModel';
+import {
+  FIRESTORE_COLLECTIONS,
+  NOTIFICATION_STATUS,
+  NOTIFICATION_TYPES,
+  RIDE_REQUEST_STATUS,
+  SAFETY_ALERT_CATEGORY,
+  SAFETY_CHECK_IN_STATUS,
+} from '../firestoreModel';
 import { registerBrowserPushToken } from '../utils/pushNotifications';
 import SearchTrips from './SearchTrips';
 import TripDetails from './TripDetails';
@@ -51,6 +59,7 @@ function PassengerDashboard() {
   const [reportedRideIds, setReportedRideIds] = useState([]);
   const [footageFormState, setFootageFormState] = useState({});
   const [chatModalRide, setChatModalRide] = useState(null);
+  const [safetyActionState, setSafetyActionState] = useState({});
 
   useEffect(() => {
     if (!firebaseReady || !auth || !db) {
@@ -252,6 +261,63 @@ function PassengerDashboard() {
     setFootageFormState(prev => ({ ...prev, [notifId]: { ...prev[notifId], ...updates } }));
   }
 
+  function updateSafetyAction(notifId, updates) {
+    setSafetyActionState(prev => ({ ...prev, [notifId]: { ...prev[notifId], ...updates } }));
+  }
+
+  const handleConfirmSafe = async (notification) => {
+    updateSafetyAction(notification.id, { submitting: 'safe', error: '' });
+    try {
+      if (firebaseReady && db && notification.tripId) {
+        await updateDoc(doc(db, FIRESTORE_COLLECTIONS.trips, notification.tripId), {
+          'safetyCheckIn.status': SAFETY_CHECK_IN_STATUS.safe,
+          'safetyCheckIn.respondedAt': new Date().toISOString(),
+          'safetyCheckIn.respondedBy': auth?.currentUser?.uid || '',
+        });
+      }
+      await handleDismissNotification(notification.id);
+      updateSafetyAction(notification.id, { submitting: '' });
+    } catch (err) {
+      updateSafetyAction(notification.id, {
+        submitting: '',
+        error: err.message || 'Could not confirm safety. Try again.',
+      });
+    }
+  };
+
+  const handleRequestHelp = async (notification) => {
+    updateSafetyAction(notification.id, { submitting: 'help', error: '' });
+    try {
+      const user = auth?.currentUser;
+      if (!firebaseReady || !db || !user) {
+        throw new Error('You must be signed in to request help.');
+      }
+
+      await addDoc(collection(db, FIRESTORE_COLLECTIONS.reports), {
+        category: SAFETY_ALERT_CATEGORY,
+        priority: 'urgent',
+        status: 'New',
+        reporterId: user.uid,
+        reporterEmail: user.email || '',
+        reportedUserId: notification.driverId || '',
+        tripId: notification.tripId || '',
+        relatedNotificationId: notification.id,
+        description: 'Passenger triggered safety check-in NEED HELP after ETA passed.',
+        createdAt: serverTimestamp(),
+      });
+
+      // Trip flagging + safetyCheckIn.status=help_requested are written
+      // server-side by the onSafetyAlertReportCreated Cloud Function.
+      await handleDismissNotification(notification.id);
+      updateSafetyAction(notification.id, { submitting: '', submitted: true });
+    } catch (err) {
+      updateSafetyAction(notification.id, {
+        submitting: '',
+        error: err.message || 'Could not raise the alert. Try again.',
+      });
+    }
+  };
+
   const handleSubmitFootage = async (notification) => {
     const form = footageFormState[notification.id] || {};
     if (!form.description?.trim() && !form.link?.trim()) {
@@ -387,30 +453,67 @@ function PassengerDashboard() {
         <section style={{ display: 'grid', gap: '10px', marginBottom: '24px' }}>
           {notifications.map((notification) => {
             const ff = footageFormState[notification.id] || {};
-            const isFootageRequest = notification.type === 'admin_request';
+            const sa = safetyActionState[notification.id] || {};
+            const isFootageRequest = notification.type === NOTIFICATION_TYPES.adminRequest;
+            const isSafetyCheckIn = notification.type === NOTIFICATION_TYPES.safetyCheckIn;
+            const bannerBg = isSafetyCheckIn ? '#fff7ed' : '#fef2f2';
+            const bannerColor = isSafetyCheckIn ? '#9a3412' : '#991b1b';
+            const bannerBorder = isSafetyCheckIn ? '#fed7aa' : '#fecaca';
             return (
-              <div key={notification.id} role="status" style={{ border: '1px solid #fecaca', borderRadius: '8px', overflow: 'hidden' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', padding: '14px 16px', backgroundColor: '#fef2f2', color: '#991b1b', fontWeight: 700 }}>
-                  <span>{notification.message || 'Your ride request update is ready.'}</span>
+              <div key={notification.id} role="status" style={{ border: `1px solid ${bannerBorder}`, borderRadius: '8px', overflow: 'hidden' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', padding: '14px 16px', backgroundColor: bannerBg, color: bannerColor, fontWeight: 700 }}>
+                  <span data-testid={isSafetyCheckIn ? 'safety-check-in-message' : undefined}>
+                    {isSafetyCheckIn && <span aria-hidden="true" style={{ marginRight: '6px' }}>🛟</span>}
+                    {notification.message || 'Your ride request update is ready.'}
+                  </span>
                   <div style={{ display: 'flex', gap: '8px', flexShrink: 0 }}>
-                    {isFootageRequest && (
-                      <button
-                        type="button"
-                        onClick={() => updateFootageForm(notification.id, { open: !ff.open })}
-                        style={{ border: 'none', borderRadius: '8px', background: '#991b1b', color: '#fff', cursor: 'pointer', fontWeight: 700, padding: '8px 12px', whiteSpace: 'nowrap', fontSize: '13px' }}
-                      >
-                        {ff.open ? 'Cancel' : 'Submit Footage'}
-                      </button>
+                    {isSafetyCheckIn ? (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => handleConfirmSafe(notification)}
+                          disabled={Boolean(sa.submitting)}
+                          style={{ border: 'none', borderRadius: '8px', background: '#047857', color: '#fff', cursor: sa.submitting ? 'wait' : 'pointer', fontWeight: 700, padding: '8px 12px', whiteSpace: 'nowrap', fontSize: '13px' }}
+                        >
+                          {sa.submitting === 'safe' ? 'Saving…' : "I'M SAFE"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleRequestHelp(notification)}
+                          disabled={Boolean(sa.submitting)}
+                          data-testid="safety-need-help"
+                          style={{ border: 'none', borderRadius: '8px', background: '#b91c1c', color: '#fff', cursor: sa.submitting ? 'wait' : 'pointer', fontWeight: 700, padding: '8px 12px', whiteSpace: 'nowrap', fontSize: '13px' }}
+                        >
+                          {sa.submitting === 'help' ? 'Alerting…' : 'NEED HELP'}
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        {isFootageRequest && (
+                          <button
+                            type="button"
+                            onClick={() => updateFootageForm(notification.id, { open: !ff.open })}
+                            style={{ border: 'none', borderRadius: '8px', background: '#991b1b', color: '#fff', cursor: 'pointer', fontWeight: 700, padding: '8px 12px', whiteSpace: 'nowrap', fontSize: '13px' }}
+                          >
+                            {ff.open ? 'Cancel' : 'Submit Footage'}
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => handleDismissNotification(notification.id)}
+                          style={{ border: '1px solid #fecaca', borderRadius: '8px', background: '#fff', color: '#991b1b', cursor: 'pointer', fontWeight: 700, padding: '8px 10px', whiteSpace: 'nowrap', fontSize: '13px' }}
+                        >
+                          Mark read
+                        </button>
+                      </>
                     )}
-                    <button
-                      type="button"
-                      onClick={() => handleDismissNotification(notification.id)}
-                      style={{ border: '1px solid #fecaca', borderRadius: '8px', background: '#fff', color: '#991b1b', cursor: 'pointer', fontWeight: 700, padding: '8px 10px', whiteSpace: 'nowrap', fontSize: '13px' }}
-                    >
-                      Mark read
-                    </button>
                   </div>
                 </div>
+                {isSafetyCheckIn && sa.error && (
+                  <div style={{ background: '#fff', padding: '10px 16px', borderTop: `1px solid ${bannerBorder}`, color: '#b91c1c', fontSize: '12px' }}>
+                    {sa.error}
+                  </div>
+                )}
                 {isFootageRequest && ff.open && (
                   <div style={{ background: '#fff', padding: '14px 16px', borderTop: '1px solid #fecaca', display: 'flex', flexDirection: 'column', gap: '10px' }}>
                     <p style={{ margin: 0, fontSize: '13px', color: '#555' }}>Describe what the footage shows, or share a link (Google Drive, Dropbox, etc.).</p>
