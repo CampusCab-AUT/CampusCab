@@ -20,6 +20,9 @@ const sendPlannedApiResponse = (res, action) =>
  *   availableSeats: number,
  *   status: string,           // "active" | "full"
  *   h3Index: string,          // H3 cell index for geospatial search (resolution 8)
+ *   womenOnly: boolean,       // If true, only users with gender === "Female"
+ *                             // see this trip in search results. Drivers can
+ *                             // only set this when their own gender is "Female".
  * }
  */
 
