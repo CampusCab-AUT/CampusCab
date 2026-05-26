@@ -23,6 +23,8 @@ const sendPlannedApiResponse = (res, action) =>
  *   womenOnly: boolean,       // If true, only users with gender === "Female"
  *                             // see this trip in search results. Drivers can
  *                             // only set this when their own gender is "Female".
+ *   costPerSeat: number|null, // Optional suggested passenger contribution per
+ *                             // seat in NZD (0–100). null/absent = no cost set.
  * }
  */
 
