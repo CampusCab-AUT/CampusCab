@@ -31,6 +31,11 @@ service cloud.firestore {
       allow update, delete: if request.auth != null && (
         request.auth.uid == resource.data.driverId || isAdmin()
       );
+      // Any signed-in passenger may respond to a safety check-in by writing
+      // ONLY the safetyCheckIn field on the trip they are on. Trip flagging on
+      // help-requested is performed by the Cloud Function (Admin SDK).
+      allow update: if request.auth != null &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['safetyCheckIn']);
     }
 
     // Ride Requests
@@ -84,11 +89,16 @@ service cloud.firestore {
         request.resource.data.raterId != request.resource.data.ratedUserId;
     }
 
-    // Reports — passengers/drivers can file; only admins can read or update
+    // Reports — passengers/drivers can file; only admins can read or update.
+    // Passengers may additionally read their own SAFETY_ALERT reports so the
+    // UI can reflect the alert state.
     match /reports/{reportId} {
       allow create: if request.auth != null &&
         request.resource.data.reporterId == request.auth.uid &&
         request.resource.data.status == 'New';
+      allow read: if request.auth != null &&
+        resource.data.category == 'SAFETY_ALERT' &&
+        resource.data.reporterId == request.auth.uid;
       allow read, update: if isAdmin();
     }
 

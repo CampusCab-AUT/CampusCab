@@ -89,6 +89,7 @@ function CreateTrip() {
   const [routeGeoJson, setRouteGeoJson] = useState(null);
   const [departureTime, setDepartureTime] = useState('');
   const [seats, setSeats] = useState(3);
+  const [estimatedDurationMinutes, setEstimatedDurationMinutes] = useState(30);
   const [message, setMessage] = useState('');
   const [recentTrip, setRecentTrip] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -105,6 +106,12 @@ function CreateTrip() {
 
     if (seats <= 0) {
       setMessage('Error: You must have at least 1 available seat.');
+      return;
+    }
+
+    const durationMinutes = parseInt(estimatedDurationMinutes, 10);
+    if (!Number.isInteger(durationMinutes) || durationMinutes <= 0) {
+      setMessage('Error: Estimated trip duration must be a positive number of minutes.');
       return;
     }
 
@@ -127,6 +134,8 @@ function CreateTrip() {
           destinationLocation: { lat: destination.lat, lon: destination.lon },
           routeGeoJson: JSON.stringify(routeGeoJson),
           departureTime,
+          estimatedDurationMinutes: durationMinutes,
+          etaAt: new Date(selectedDate.getTime() + durationMinutes * 60000).toISOString(),
           seats: parseInt(seats, 10),
           availableSeats: parseInt(seats, 10),
           status: TRIP_STATUS.active,
@@ -149,6 +158,8 @@ function CreateTrip() {
         destinationLocation: { lat: destination.lat, lon: destination.lon },
         routeGeoJson: JSON.stringify(routeGeoJson),
         departureTime,
+        estimatedDurationMinutes: durationMinutes,
+        etaAt: new Date(selectedDate.getTime() + durationMinutes * 60000).toISOString(),
         seats: parseInt(seats, 10),
         availableSeats: parseInt(seats, 10),
         status: TRIP_STATUS.active,
@@ -221,6 +232,19 @@ function CreateTrip() {
             />
           </Field>
         </div>
+
+        <Field
+          label="Estimated trip duration (minutes)"
+          helper="Used to send passengers a safety check-in 10 minutes after the estimated arrival."
+        >
+          <StyledInput
+            type="number"
+            min="1"
+            value={estimatedDurationMinutes}
+            onChange={(e) => setEstimatedDurationMinutes(e.target.value)}
+            required
+          />
+        </Field>
 
         <button
           type="submit"
