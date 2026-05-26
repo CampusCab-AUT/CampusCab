@@ -197,6 +197,7 @@ function CreateTrip() {
 
   const [driverGender, setDriverGender] = useState(null);
   const [womenOnly, setWomenOnly] = useState(false);
+  const [costPerSeat, setCostPerSeat] = useState('');
 
   useEffect(() => {
     if (!firebaseReady || !db || !auth?.currentUser) return;
@@ -240,6 +241,14 @@ function CreateTrip() {
       return;
     }
 
+    if (costPerSeat !== '') {
+      const parsedCost = Number(costPerSeat);
+      if (!Number.isFinite(parsedCost) || parsedCost < 0 || parsedCost > 100) {
+        setMessage('Error: Cost per seat must be between $0 and $100.');
+        return;
+      }
+    }
+
     const selectedDate = new Date(departureTime);
     const now = new Date();
     if (selectedDate <= now) {
@@ -273,6 +282,7 @@ function CreateTrip() {
       availableSeats: parseInt(seats, 10),
       status: TRIP_STATUS.active,
       womenOnly: Boolean(womenOnly),
+      costPerSeat: costPerSeat === '' ? null : Number(Number(costPerSeat).toFixed(2)),
     });
 
     setIsSubmitting(true);
@@ -400,6 +410,22 @@ function CreateTrip() {
               value={seats}
               onChange={(e) => setSeats(e.target.value)}
               required
+            />
+          </Field>
+
+          <Field
+            label="Cost per seat (optional)"
+            helper="Suggested passenger contribution per seat in NZD. Leave blank for a free ride."
+          >
+            <StyledInput
+              type="number"
+              min="0"
+              max="100"
+              step="0.01"
+              placeholder="0.00"
+              value={costPerSeat}
+              onChange={(e) => setCostPerSeat(e.target.value)}
+              aria-label="Cost per seat in New Zealand dollars"
             />
           </Field>
         </div>
