@@ -19,6 +19,7 @@ export const FIRESTORE_COLLECTIONS = {
   auditLogs: 'auditLogs',
   chats: 'chats',
   calls: 'calls',
+  routeAlerts: 'routeAlerts',
 };
 
 /**
@@ -51,5 +52,25 @@ export const RIDE_REQUEST_STATUS = {
 export const NOTIFICATION_STATUS = {
   unread: 'unread',
   read: 'read',
+};
+
+/**
+ * Represents the lifecycle of a passenger route alert.
+ * @constant {Object}
+ */
+export const ROUTE_ALERT_STATUS = {
+  active: 'active',
+  paused: 'paused',
+  fulfilled: 'fulfilled',
+};
+
+/**
+ * Scope options that control how long a route alert remains eligible to match new trips.
+ * @constant {Object}
+ */
+export const ROUTE_ALERT_SCOPE = {
+  date: 'date',
+  week: 'week',
+  ongoing: 'ongoing',
 };
 
