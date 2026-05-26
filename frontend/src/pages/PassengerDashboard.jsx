@@ -304,6 +304,23 @@ function PassengerDashboard() {
     setMessage('');
 
     try {
+      // Check for late cancellation (< 30 min before departure)
+      const THIRTY_MIN_MS = 30 * 60 * 1000;
+      const STRIKE_THRESHOLD = 3;
+      const departureTime = rideToCancel.trip?.departureTime;
+      const departureMs = departureTime ? new Date(departureTime).getTime() : null;
+      const isLateCancel = departureMs !== null && (departureMs - Date.now()) < THIRTY_MIN_MS;
+
+      let lateCancelUpdate = null;
+      if (isLateCancel) {
+        const userSnap = await getDoc(doc(db, FIRESTORE_COLLECTIONS.users, user.uid));
+        if (userSnap.exists()) {
+          const newCount = (userSnap.data().lateCancelCount || 0) + 1;
+          lateCancelUpdate = { lateCancelCount: newCount };
+          if (newCount >= STRIKE_THRESHOLD) lateCancelUpdate.flaggedForLateCancellations = true;
+        }
+      }
+
       const batch = writeBatch(db);
       const requestRef = doc(db, FIRESTORE_COLLECTIONS.rideRequests, rideToCancel.id);
       const notificationRef = doc(collection(db, FIRESTORE_COLLECTIONS.notifications));
@@ -315,6 +332,10 @@ function PassengerDashboard() {
         status: RIDE_REQUEST_STATUS.cancelled,
         cancelledAt: serverTimestamp(),
       });
+
+      if (lateCancelUpdate) {
+        batch.update(doc(db, FIRESTORE_COLLECTIONS.users, user.uid), lateCancelUpdate);
+      }
 
       if (driverId) {
         batch.set(notificationRef, {

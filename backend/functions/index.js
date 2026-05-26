@@ -358,6 +358,46 @@ exports.onApprovedRideRequestCancelled = functions.firestore
       restoredSeats: restoreResult.restoredSeats,
     });
 
+    // Late-cancellation strike: only for passenger-initiated cancellations
+    const isPassengerInitiated = !afterData.cancellationSource;
+    if (isPassengerInitiated && afterData.passengerId && afterData.tripId) {
+      try {
+        const tripSnap = await db.collection('trips').doc(afterData.tripId).get();
+        if (tripSnap.exists) {
+          const departureTime = tripSnap.data().departureTime;
+          const departureMs = departureTime ? new Date(departureTime).getTime() : null;
+          const cancelledMs = afterData.cancelledAt
+            ? (afterData.cancelledAt.toDate ? afterData.cancelledAt.toDate().getTime() : new Date(afterData.cancelledAt).getTime())
+            : Date.now();
+
+          const THIRTY_MIN_MS = 30 * 60 * 1000;
+          const STRIKE_THRESHOLD = 3;
+          const isLateCancel = departureMs !== null && (departureMs - cancelledMs) < THIRTY_MIN_MS;
+
+          if (isLateCancel) {
+            const userRef = db.collection('users').doc(afterData.passengerId);
+            await db.runTransaction(async (txn) => {
+              const userSnap = await txn.get(userRef);
+              if (!userSnap.exists) return;
+              const currentCount = (userSnap.data().lateCancelCount || 0) + 1;
+              const update = { lateCancelCount: currentCount };
+              if (currentCount >= STRIKE_THRESHOLD) {
+                update.flaggedForLateCancellations = true;
+              }
+              txn.update(userRef, update);
+            });
+            functions.logger.info('Late-cancellation strike recorded.', {
+              passengerId: afterData.passengerId,
+              tripId: afterData.tripId,
+              minutesToDeparture: departureMs !== null ? Math.round((departureMs - cancelledMs) / 60000) : 'unknown',
+            });
+          }
+        }
+      } catch (err) {
+        functions.logger.error('Failed to process late-cancellation strike.', { error: err.message });
+      }
+    }
+
     return null;
   });
 
