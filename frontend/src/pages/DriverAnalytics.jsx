@@ -87,7 +87,7 @@ const DEMO_RATINGS = [
 
 const DEMO_PROFILE = { displayName: 'Alex', averageRating: 4.7, totalRatings: 10 };
 
-function HeroBand({ greetingName, analytics }) {
+function HeroBand({ greetingName, analytics, isDesktop }) {
   return (
     <section
       style={{
@@ -150,10 +150,11 @@ function HeroBand({ greetingName, analytics }) {
         <h2
           style={{
             margin: 0,
-            fontSize: '1.6rem',
+            fontSize: isDesktop ? '1.6rem' : '1.35rem',
             fontWeight: 900,
             color: '#fff',
             letterSpacing: '-0.015em',
+            wordBreak: 'break-word',
           }}
         >
           Hi{greetingName ? `, ${greetingName}` : ''} — here's how you're doing
@@ -174,7 +175,9 @@ function HeroBand({ greetingName, analytics }) {
         <div
           style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+            gridTemplateColumns: isDesktop
+              ? 'repeat(2, minmax(0, 1fr))'
+              : '1fr',
             gap: '14px',
             maxWidth: '560px',
           }}
@@ -739,7 +742,11 @@ export default function DriverAnalytics({ onBackToDashboard }) {
       )}
 
       <div style={gridStyle}>
-        <HeroBand greetingName={greetingName} analytics={analytics} />
+        <HeroBand
+          greetingName={greetingName}
+          analytics={analytics}
+          isDesktop={isDesktop}
+        />
 
         {noData ? (
           <div style={{ gridColumn: '1 / -1' }}>
