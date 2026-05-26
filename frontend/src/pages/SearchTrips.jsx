@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { collection, query, where, getDocs, doc, serverTimestamp, writeBatch } from 'firebase/firestore';
+import React, { useEffect, useState } from 'react';
+import { collection, query, where, getDocs, doc, getDoc, serverTimestamp, writeBatch } from 'firebase/firestore';
 import { db, firebaseReady, auth } from '../firebase';
 import {
   FIRESTORE_COLLECTIONS,
@@ -39,7 +39,16 @@ const SearchTrips = ({ onTripSelect }) => {
   const [error, setError] = useState('');
   const [hasSearched, setHasSearched] = useState(false);
   const [timeFilter, setTimeFilter] = useState('All');
+  const [currentUserGender, setCurrentUserGender] = useState(null);
   const { savedAddresses } = useSavedAddresses();
+
+  useEffect(() => {
+    if (!firebaseReady || !db || !auth?.currentUser) return;
+    const uid = auth.currentUser.uid;
+    getDoc(doc(db, FIRESTORE_COLLECTIONS.users, uid))
+      .then((snap) => setCurrentUserGender(snap.exists() ? (snap.data().gender || '') : ''))
+      .catch(() => setCurrentUserGender(''));
+  }, []);
 
   const handleSearch = async (e) => {
     e.preventDefault();
@@ -72,6 +81,7 @@ const SearchTrips = ({ onTripSelect }) => {
       
       querySnapshot.forEach((doc) => {
         const data = doc.data();
+        if (data.womenOnly && currentUserGender !== 'Female') return;
         if (isSameDepartureDate(data.departureTime, date) && hasAvailableSeats(data)) {
           const tripDateTime = new Date(data.departureTime);
           const now = new Date();
@@ -264,6 +274,21 @@ const SearchTrips = ({ onTripSelect }) => {
                         <div style={{ ...typography.h3, marginBottom: spacing.xs }}>
                           {trip.origin} <span style={{ color: colors.textSubtle }}>→</span> {trip.destination}
                         </div>
+                        {trip.womenOnly && (
+                          <div
+                            style={{
+                              ...pills.base,
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 4,
+                              background: 'linear-gradient(135deg, #ec4899, #d946ef)',
+                              color: '#ffffff',
+                              marginBottom: spacing.xs,
+                            }}
+                          >
+                            <span aria-hidden="true">👩</span> Women-only
+                          </div>
+                        )}
                         {trip.distanceKm !== null && (
                           <div style={{ ...typography.small, color: colors.textSubtle, marginTop: '4px' }}>
                             <strong>Proximity:</strong> Approx. {trip.distanceKm.toFixed(1)} km from your pickup location
