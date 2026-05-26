@@ -18,6 +18,8 @@ const sendPlannedApiResponse = (res, action) =>
  *   universityId: string,
  *   studentVerified: boolean,
  *   averageRating: number,
+ *   gender: string,          // "Female" | "Male" | "Non-binary" | "Prefer not to say"
+ *                            // Self-declared; gates women-only ride visibility.
  *   // Driver-only fields (from class diagram):
  *   driverLicenseNumber: string,
  *   licenseExpiryDate: string,

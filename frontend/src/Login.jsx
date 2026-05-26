@@ -28,6 +28,7 @@ function Login({ onLoginSuccess }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
+  const [gender, setGender] = useState('');
   const [message, setMessage] = useState('');
   const [emailFocus, setEmailFocus] = useState(false);
   const [passFocus, setPassFocus] = useState(false);
@@ -44,6 +45,7 @@ function Login({ onLoginSuccess }) {
     setEmail('');
     setPassword('');
     setFullName('');
+    setGender('');
   };
   /**
    * Handles the form submission for both Registration and Login flows.
@@ -81,6 +83,11 @@ function Login({ onLoginSuccess }) {
         setMessage('Validation error: You must use a valid AUT email address (@aut.ac.nz or @autuni.ac.nz).');
         return;
       }
+      const allowedGenders = ['Female', 'Male', 'Non-binary', 'Prefer not to say'];
+      if (!allowedGenders.includes(gender)) {
+        setMessage('Validation error: Please select a gender option.');
+        return;
+      }
       try {
         const credential = await createUserWithEmailAndPassword(auth, email, password);
         await updateProfile(credential.user, { displayName: trimmedName });
@@ -90,6 +97,7 @@ function Login({ onLoginSuccess }) {
             {
               displayName: trimmedName,
               email: credential.user.email,
+              gender,
               createdAt: serverTimestamp(),
               updatedAt: serverTimestamp(),
             },
@@ -316,6 +324,24 @@ function Login({ onLoginSuccess }) {
               autoComplete="name"
               style={{ ...inputs.field, ...(nameFocus ? inputs.fieldFocus : null) }}
             />
+          </div>
+        )}
+        {mode === 'register' && (
+          <div>
+            <label style={inputs.label} htmlFor="gender">Gender</label>
+            <select
+              id="gender"
+              value={gender}
+              onChange={(e) => setGender(e.target.value)}
+              required
+              style={inputs.field}
+            >
+              <option value="">Select gender</option>
+              <option value="Female">Female</option>
+              <option value="Male">Male</option>
+              <option value="Non-binary">Non-binary</option>
+              <option value="Prefer not to say">Prefer not to say</option>
+            </select>
           </div>
         )}
         <div>

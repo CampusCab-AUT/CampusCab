@@ -10,6 +10,7 @@ import SavedAddresses from './SavedAddresses';
 export default function UserProfilePanel() {
   const [displayName, setDisplayName] = useState('');
   const [bio, setBio] = useState('');
+  const [gender, setGender] = useState('');
   const [avatarUrl, setAvatarUrl] = useState(null);
   const [avatarPreview, setAvatarPreview] = useState(null);
   const [avatarFile, setAvatarFile] = useState(null);
@@ -32,6 +33,7 @@ export default function UserProfilePanel() {
           const data = userSnap.exists() ? userSnap.data() : {};
           setDisplayName(data.displayName || user.displayName || '');
           if (data.bio) setBio(data.bio);
+          if (data.gender) setGender(data.gender);
           if (data.avatarUrl) setAvatarUrl(data.avatarUrl);
         } catch (error) {
           console.error("Error loading profile:", error);
@@ -99,6 +101,7 @@ export default function UserProfilePanel() {
       await setDoc(userDocRef, {
         displayName: trimmedName,
         bio,
+        gender,
         avatarUrl: finalAvatarUrl,
         updatedAt: serverTimestamp(),
       }, { merge: true });
@@ -191,6 +194,26 @@ export default function UserProfilePanel() {
           />
           <div style={{ ...typography.small, color: colors.textSubtle, marginTop: '4px' }}>
             This is the name drivers and passengers will see.
+          </div>
+        </div>
+
+        {/* Gender Section */}
+        <div style={{ marginBottom: spacing.lg }}>
+          <label htmlFor="gender" style={{ ...inputs.label }}>Gender</label>
+          <select
+            id="gender"
+            value={gender}
+            onChange={(e) => setGender(e.target.value)}
+            style={{ ...inputs.field }}
+          >
+            <option value="">Not specified</option>
+            <option value="Female">Female</option>
+            <option value="Male">Male</option>
+            <option value="Non-binary">Non-binary</option>
+            <option value="Prefer not to say">Prefer not to say</option>
+          </select>
+          <div style={{ ...typography.small, color: colors.textSubtle, marginTop: '4px' }}>
+            Required for booking women-only rides.
           </div>
         </div>
 
