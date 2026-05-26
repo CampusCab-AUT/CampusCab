@@ -18,11 +18,22 @@ const TRIP_STATUS = {
   active: 'active',
   full: 'full',
   cancelled: 'cancelled',
+  inProgress: 'in_progress',
+  completed: 'completed',
 };
 
 const NOTIFICATION_STATUS = {
   unread: 'unread',
 };
+
+const SAFETY_CHECK_IN_STATUS = {
+  pending: 'pending',
+  safe: 'safe',
+  helpRequested: 'help_requested',
+};
+
+const SAFETY_ALERT_CATEGORY = 'SAFETY_ALERT';
+const SAFETY_CHECK_IN_GRACE_MINUTES = 10;
 
 const getSmtpTransporter = () =>
   nodemailer.createTransport({
@@ -414,5 +425,203 @@ exports.onUserSuspended = functions.firestore
       });
     }
 
+    return null;
+  });
+
+const parseEtaToDate = (etaAt) => {
+  if (!etaAt) return null;
+  if (typeof etaAt.toDate === 'function') return etaAt.toDate();
+  const parsed = new Date(etaAt);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
+
+const sendSafetyCheckInForTrip = async (tripDoc) => {
+  const tripData = tripDoc.data();
+  const tripId = tripDoc.id;
+
+  const requestsSnapshot = await db
+    .collection('rideRequests')
+    .where('tripId', '==', tripId)
+    .where('status', '==', RIDE_REQUEST_STATUS.approved)
+    .get();
+
+  const passengerIds = Array.from(
+    new Set(
+      requestsSnapshot.docs
+        .map((requestDoc) => requestDoc.data().passengerId)
+        .filter(Boolean),
+    ),
+  );
+
+  if (passengerIds.length === 0) {
+    await tripDoc.ref.update({
+      'safetyCheckIn.status': SAFETY_CHECK_IN_STATUS.pending,
+      'safetyCheckIn.sentAt': admin.firestore.FieldValue.serverTimestamp(),
+      'safetyCheckIn.passengerCount': 0,
+    });
+    functions.logger.info('Safety check-in skipped: no approved passengers.', { tripId });
+    return;
+  }
+
+  const origin = tripData.origin || 'your pickup';
+  const destination = tripData.destination || 'campus';
+  const checkInMessage = `Your trip from ${origin} to ${destination} should have arrived. Tap to confirm you are safe.`;
+
+  const batch = db.batch();
+  passengerIds.forEach((passengerId) => {
+    batch.set(db.collection('notifications').doc(), {
+      type: 'safety_check_in',
+      recipientId: passengerId,
+      tripId,
+      driverId: tripData.driverId || '',
+      status: NOTIFICATION_STATUS.unread,
+      message: checkInMessage,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+  });
+  batch.update(tripDoc.ref, {
+    safetyCheckIn: {
+      status: SAFETY_CHECK_IN_STATUS.pending,
+      sentAt: admin.firestore.FieldValue.serverTimestamp(),
+      passengerCount: passengerIds.length,
+    },
+  });
+  await batch.commit();
+
+  const tokenDocsByPassenger = await Promise.all(
+    passengerIds.map(async (passengerId) => {
+      const tokensSnapshot = await db
+        .collection('pushTokens')
+        .where('userId', '==', passengerId)
+        .where('role', '==', 'passenger')
+        .get();
+      return tokensSnapshot.docs
+        .map((tokenDoc) => ({
+          ref: tokenDoc.ref,
+          token: tokenDoc.data().token,
+        }))
+        .filter((tokenDoc) => Boolean(tokenDoc.token));
+    }),
+  );
+  const tokenDocs = tokenDocsByPassenger.flat();
+  const tokens = tokenDocs.map((tokenDoc) => tokenDoc.token);
+
+  if (tokens.length === 0) {
+    functions.logger.info('Safety check-in: no passenger push tokens for trip.', { tripId });
+    return;
+  }
+
+  const response = await admin.messaging().sendEachForMulticast({
+    tokens,
+    notification: {
+      title: 'Safety check-in',
+      body: checkInMessage,
+    },
+    data: {
+      type: 'safety_check_in',
+      tripId,
+      url: '/',
+      body: checkInMessage,
+    },
+    webpush: {
+      fcmOptions: {
+        link: '/',
+      },
+    },
+  });
+
+  functions.logger.info('Safety check-in push sent.', {
+    tripId,
+    successCount: response.successCount,
+    failureCount: response.failureCount,
+  });
+
+  await deleteStaleTokens(response, tokenDocs, { tripId });
+};
+
+exports.safetyCheckInScheduler = functions.pubsub
+  .schedule('every 5 minutes')
+  .onRun(async () => {
+    const cutoff = new Date(Date.now() - SAFETY_CHECK_IN_GRACE_MINUTES * 60 * 1000);
+
+    const tripsSnapshot = await db
+      .collection('trips')
+      .where('status', '==', TRIP_STATUS.inProgress)
+      .get();
+
+    const tripsNeedingPing = tripsSnapshot.docs.filter((tripDoc) => {
+      const data = tripDoc.data();
+      const existingStatus = data.safetyCheckIn?.status;
+      if (existingStatus) return false;
+      const etaDate = parseEtaToDate(data.etaAt);
+      return etaDate ? etaDate <= cutoff : false;
+    });
+
+    if (tripsNeedingPing.length === 0) {
+      return null;
+    }
+
+    functions.logger.info('Safety check-in scheduler firing.', {
+      candidateCount: tripsNeedingPing.length,
+    });
+
+    await Promise.all(
+      tripsNeedingPing.map(async (tripDoc) => {
+        try {
+          await sendSafetyCheckInForTrip(tripDoc);
+        } catch (err) {
+          functions.logger.error('Safety check-in failed for trip.', {
+            tripId: tripDoc.id,
+            error: err.message,
+          });
+        }
+      }),
+    );
+
+    return null;
+  });
+
+exports.onSafetyAlertReportCreated = functions.firestore
+  .document('reports/{reportId}')
+  .onCreate(async (snap, context) => {
+    const reportData = snap.data() || {};
+    if (reportData.category !== SAFETY_ALERT_CATEGORY) {
+      return null;
+    }
+
+    const reportId = context.params.reportId;
+    const tripId = reportData.tripId || '';
+    const passengerId = reportData.reporterId || '';
+
+    await db.collection('auditLogs').add({
+      action: 'SAFETY_ALERT_RAISED',
+      reportId,
+      tripId,
+      passengerId,
+      reportedUserId: reportData.reportedUserId || '',
+      priority: reportData.priority || 'urgent',
+      timestamp: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    if (tripId) {
+      try {
+        await db.collection('trips').doc(tripId).update({
+          flagged: true,
+          flaggedReason: 'safety_alert',
+          flaggedReportId: reportId,
+          flaggedAt: admin.firestore.FieldValue.serverTimestamp(),
+          'safetyCheckIn.status': SAFETY_CHECK_IN_STATUS.helpRequested,
+          'safetyCheckIn.respondedAt': admin.firestore.FieldValue.serverTimestamp(),
+        });
+      } catch (err) {
+        functions.logger.error('Failed to flag trip after safety alert.', {
+          tripId,
+          reportId,
+          error: err.message,
+        });
+      }
+    }
+
+    functions.logger.info('Safety alert audit log written.', { reportId, tripId, passengerId });
     return null;
   });

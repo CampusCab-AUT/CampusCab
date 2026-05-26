@@ -53,3 +53,32 @@ export const NOTIFICATION_STATUS = {
   read: 'read',
 };
 
+/**
+ * Notification types used across passenger / driver / admin dashboards.
+ * @constant {Object}
+ */
+export const NOTIFICATION_TYPES = {
+  rideRequest: 'ride_request',
+  tripCancelled: 'trip_cancelled',
+  seatCancellation: 'seat_cancellation',
+  adminRequest: 'admin_request',
+  safetyCheckIn: 'safety_check_in',
+  safetyAlert: 'safety_alert',
+};
+
+/**
+ * Status of a passenger's response to a post-ETA safety ping.
+ * @constant {Object}
+ */
+export const SAFETY_CHECK_IN_STATUS = {
+  pending: 'pending',
+  safe: 'safe',
+  helpRequested: 'help_requested',
+};
+
+/**
+ * Report category used when a passenger triggers a safety alert.
+ * @constant {string}
+ */
+export const SAFETY_ALERT_CATEGORY = 'SAFETY_ALERT';
+

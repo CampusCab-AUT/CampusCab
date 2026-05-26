@@ -15,7 +15,6 @@ import {
   colors,
   pills,
   radius,
-  shadows,
   surfaces,
   typography,
 } from '../theme';
