@@ -3,7 +3,8 @@ import { doc, getDoc, collection, writeBatch, serverTimestamp } from 'firebase/f
 import { db, auth, firebaseReady } from '../firebase';
 import { FIRESTORE_COLLECTIONS, NOTIFICATION_STATUS, RIDE_REQUEST_STATUS } from '../firestoreModel';
 import { RouteMap } from '../components/MapComponents';
-import { colors, radius, spacing, typography, surfaces, buttons, inputs, shadows } from '../theme';
+import { colors, radius, spacing, typography, surfaces, buttons, inputs, pills, shadows } from '../theme';
+import { formatNZD } from '../utils/currency';
 
 function formatDeparture(departureTime) {
   if (!departureTime) return 'Departure time unavailable';
@@ -135,6 +136,23 @@ function TripDetails({ trip, onBack }) {
         <h2 style={{ ...typography.display, fontSize: '1.8rem', marginBottom: spacing.md }}>
           {trip.origin} <span style={{ color: colors.textSubtle, fontWeight: 400 }}>to</span> {trip.destination}
         </h2>
+
+        {typeof trip.costPerSeat === 'number' && trip.costPerSeat > 0 && (
+          <div
+            style={{
+              ...pills.base,
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              background: 'linear-gradient(135deg, #10b981, #059669)',
+              color: '#ffffff',
+              marginBottom: spacing.md,
+            }}
+            aria-label={`Suggested contribution ${formatNZD(trip.costPerSeat)} per seat`}
+          >
+            <span aria-hidden="true">💰</span> Contribution {formatNZD(trip.costPerSeat)}/seat
+          </div>
+        )}
 
         {/* Route Map */}
         <div style={{ marginBottom: spacing.xl }}>
