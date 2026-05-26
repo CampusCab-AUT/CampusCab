@@ -5,9 +5,9 @@
  */
 
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { db, auth, firebaseReady } from './firebase';
-import { addDoc, collection, serverTimestamp, writeBatch, doc } from 'firebase/firestore';
+import { addDoc, collection, serverTimestamp, writeBatch, doc, getDoc } from 'firebase/firestore';
 import { buttons, colors, inputs, pills, radius, shadows, typography } from './theme';
 import { FIRESTORE_COLLECTIONS, TRIP_STATUS } from './firestoreModel';
 import useIsDesktop from './hooks/useIsDesktop';
@@ -195,6 +195,17 @@ function CreateTrip() {
   const [selectedDays, setSelectedDays] = useState([]);
   const [weeks, setWeeks] = useState(2);
 
+  const [driverGender, setDriverGender] = useState(null);
+  const [womenOnly, setWomenOnly] = useState(false);
+
+  useEffect(() => {
+    if (!firebaseReady || !db || !auth?.currentUser) return;
+    const uid = auth.currentUser.uid;
+    getDoc(doc(db, FIRESTORE_COLLECTIONS.users, uid))
+      .then((snap) => setDriverGender(snap.exists() ? (snap.data().gender || '') : ''))
+      .catch(() => setDriverGender(''));
+  }, []);
+
   const isDesktop = useIsDesktop();
   const { savedAddresses } = useSavedAddresses();
 
@@ -221,6 +232,11 @@ function CreateTrip() {
 
     if (seats <= 0) {
       setMessage('Error: You must have at least 1 available seat.');
+      return;
+    }
+
+    if (womenOnly && driverGender !== 'Female') {
+      setMessage('Error: Only female drivers can create women-only trips.');
       return;
     }
 
@@ -256,6 +272,7 @@ function CreateTrip() {
       seats: parseInt(seats, 10),
       availableSeats: parseInt(seats, 10),
       status: TRIP_STATUS.active,
+      womenOnly: Boolean(womenOnly),
     });
 
     setIsSubmitting(true);
@@ -575,6 +592,96 @@ function CreateTrip() {
             </div>
           )}
         </div>
+
+        {/* ─── Women-only ride panel (female drivers only) ──────── */}
+        {driverGender === 'Female' && (
+          <div
+            style={{
+              borderRadius: radius.lg,
+              border: `1.5px solid ${womenOnly ? 'transparent' : colors.border}`,
+              background: womenOnly
+                ? 'linear-gradient(135deg, rgba(217, 70, 239, 0.08), rgba(236, 72, 153, 0.06))'
+                : colors.surfaceMuted,
+              padding: '16px 18px',
+              boxShadow: womenOnly ? shadows.soft : 'none',
+              transition: 'background 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease',
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '12px',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <div
+                  style={{
+                    width: 38,
+                    height: 38,
+                    borderRadius: '50%',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    background: womenOnly
+                      ? 'linear-gradient(135deg, #ec4899, #d946ef)'
+                      : '#ffffff',
+                    border: `1px solid ${colors.border}`,
+                    fontSize: '1.05rem',
+                    color: womenOnly ? '#ffffff' : colors.textSubtle,
+                    transition: 'background 0.2s ease, color 0.2s ease',
+                  }}
+                  aria-hidden="true"
+                >
+                  👩
+                </div>
+                <div>
+                  <div style={{ ...typography.h3, marginBottom: 2 }}>Women-only ride</div>
+                  <div style={{ ...typography.small, color: colors.textSubtle }}>
+                    Hide this trip from male and non-female passengers.
+                  </div>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                role="switch"
+                aria-checked={womenOnly}
+                aria-label="Women-only ride"
+                onClick={() => setWomenOnly((v) => !v)}
+                style={{
+                  position: 'relative',
+                  width: 52,
+                  height: 30,
+                  borderRadius: radius.pill,
+                  border: 'none',
+                  cursor: 'pointer',
+                  background: womenOnly
+                    ? 'linear-gradient(135deg, #ec4899, #d946ef)'
+                    : '#cbd5e1',
+                  transition: 'background 0.2s ease',
+                  padding: 0,
+                  flexShrink: 0,
+                }}
+              >
+                <span
+                  style={{
+                    position: 'absolute',
+                    top: 3,
+                    left: womenOnly ? 25 : 3,
+                    width: 24,
+                    height: 24,
+                    borderRadius: '50%',
+                    background: '#ffffff',
+                    boxShadow: '0 2px 6px rgba(15, 23, 42, 0.2)',
+                    transition: 'left 0.2s ease',
+                  }}
+                />
+              </button>
+            </div>
+          </div>
+        )}
 
         <button
           type="submit"
