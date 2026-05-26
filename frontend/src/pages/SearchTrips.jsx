@@ -12,6 +12,7 @@ import { AddressSearch, AUT_CAMPUSES } from '../components/MapComponents';
 import useSavedAddresses from '../hooks/useSavedAddresses';
 import * as turf from '@turf/turf';
 import { filterTripsByTimeOfDay } from '../utils/timeFilters';
+import { formatNZD } from '../utils/currency';
 
 function isSameDepartureDate(departureTime, selectedDate) {
   return Boolean(departureTime && selectedDate && departureTime.startsWith(selectedDate));
@@ -274,21 +275,37 @@ const SearchTrips = ({ onTripSelect }) => {
                         <div style={{ ...typography.h3, marginBottom: spacing.xs }}>
                           {trip.origin} <span style={{ color: colors.textSubtle }}>→</span> {trip.destination}
                         </div>
-                        {trip.womenOnly && (
-                          <div
-                            style={{
-                              ...pills.base,
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: 4,
-                              background: 'linear-gradient(135deg, #ec4899, #d946ef)',
-                              color: '#ffffff',
-                              marginBottom: spacing.xs,
-                            }}
-                          >
-                            <span aria-hidden="true">👩</span> Women-only
-                          </div>
-                        )}
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: spacing.xs, marginBottom: spacing.xs }}>
+                          {trip.womenOnly && (
+                            <div
+                              style={{
+                                ...pills.base,
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 4,
+                                background: 'linear-gradient(135deg, #ec4899, #d946ef)',
+                                color: '#ffffff',
+                              }}
+                            >
+                              <span aria-hidden="true">👩</span> Women-only
+                            </div>
+                          )}
+                          {typeof trip.costPerSeat === 'number' && trip.costPerSeat > 0 && (
+                            <div
+                              style={{
+                                ...pills.base,
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 4,
+                                background: 'linear-gradient(135deg, #10b981, #059669)',
+                                color: '#ffffff',
+                              }}
+                              aria-label={`Suggested contribution ${formatNZD(trip.costPerSeat)} per seat`}
+                            >
+                              <span aria-hidden="true">💰</span> {formatNZD(trip.costPerSeat)}/seat
+                            </div>
+                          )}
+                        </div>
                         {trip.distanceKm !== null && (
                           <div style={{ ...typography.small, color: colors.textSubtle, marginTop: '4px' }}>
                             <strong>Proximity:</strong> Approx. {trip.distanceKm.toFixed(1)} km from your pickup location
