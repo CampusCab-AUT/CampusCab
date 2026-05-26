@@ -3,7 +3,7 @@ import { doc, getDoc, collection, writeBatch, serverTimestamp } from 'firebase/f
 import { db, auth, firebaseReady } from '../firebase';
 import { FIRESTORE_COLLECTIONS, NOTIFICATION_STATUS, RIDE_REQUEST_STATUS } from '../firestoreModel';
 import { RouteMap } from '../components/MapComponents';
-import { colors, radius, spacing, typography, surfaces, buttons, inputs, pills, shadows } from '../theme';
+import { colors, radius, spacing, typography, surfaces, buttons, inputs, pills } from '../theme';
 import { formatNZD } from '../utils/currency';
 
 function formatDeparture(departureTime) {
