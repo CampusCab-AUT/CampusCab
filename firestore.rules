@@ -12,26 +12,37 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
-    // Profiles — own-user read/write, admin read/update for moderation
+    // Profiles
     match /users/{userId} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
-      allow read, update: if isAdmin();
+      allow read: if request.auth != null && request.auth.uid == userId;
+      allow create: if request.auth != null && request.auth.uid == userId;
+      // Prevent self-escalation: users cannot touch role or suspension fields
+      allow update: if request.auth != null && request.auth.uid == userId &&
+        !request.resource.data.diff(resource.data).affectedKeys()
+          .hasAny(['role', 'suspended', 'suspendedUntil', 'suspendedReason']);
+      allow delete: if request.auth != null && request.auth.uid == userId;
+      allow read, create, update: if isAdmin();
     }
 
     // Trips
     match /trips/{tripId} {
       allow read: if true;
       allow create: if request.auth != null;
-      allow update, delete: if request.auth != null && request.auth.uid == resource.data.driverId;
+      allow update, delete: if request.auth != null && (
+        request.auth.uid == resource.data.driverId || isAdmin()
+      );
     }
 
     // Ride Requests
     match /rideRequests/{requestId} {
       allow read: if request.auth != null && (
         request.auth.uid == resource.data.passengerId ||
-        request.auth.uid == resource.data.tripOwnerId
+        request.auth.uid == resource.data.tripOwnerId ||
+        isAdmin()
       );
-      allow create: if request.auth != null;
+      // Enforce that the requester is filing on their own behalf
+      allow create: if request.auth != null &&
+        request.resource.data.passengerId == request.auth.uid;
       allow update: if request.auth != null && (
         request.auth.uid == resource.data.passengerId ||
         request.auth.uid == resource.data.tripOwnerId
@@ -41,39 +52,59 @@ service cloud.firestore {
     // Notifications
     match /notifications/{notificationId} {
       allow read: if request.auth != null && request.auth.uid == resource.data.recipientId;
-      // Allow authenticated users to create notifications for others (e.g. driver for passenger)
+      // Authenticated users can create notifications for others (e.g. driver notifying passenger)
       allow create: if request.auth != null;
       allow update: if request.auth != null && request.auth.uid == resource.data.recipientId;
+      allow delete: if isAdmin();
     }
 
-    // Push Tokens
+    // Push Tokens — split write so delete uses resource.data (not request.resource.data)
     match /pushTokens/{tokenId} {
-      allow read, write: if request.auth != null && request.auth.uid == request.resource.data.userId;
-      // For existing docs on read
-      allow read: if request.auth != null && request.auth.uid == resource.data.userId;
+      allow read: if request.auth != null && resource.data.userId == request.auth.uid;
+      allow create: if request.auth != null && request.resource.data.userId == request.auth.uid;
+      allow update: if request.auth != null && resource.data.userId == request.auth.uid;
+      allow delete: if request.auth != null && resource.data.userId == request.auth.uid;
     }
 
-    // Vehicles
+    // Vehicles — split write so delete uses resource.data (not request.resource.data)
     match /vehicles/{vehicleId} {
       allow read: if true;
-      allow write: if request.auth != null && request.auth.uid == request.resource.data.ownerId;
-      allow read, update, delete: if request.auth != null && request.auth.uid == resource.data.ownerId;
+      allow create: if request.auth != null && request.resource.data.ownerId == request.auth.uid;
+      allow update: if request.auth != null && resource.data.ownerId == request.auth.uid;
+      allow delete: if request.auth != null && (
+        resource.data.ownerId == request.auth.uid || isAdmin()
+      );
     }
 
-    // Ratings
+    // Ratings — prevent self-rating and impersonation
     match /ratings/{ratingId} {
-      allow read, create: if request.auth != null;
+      allow read: if request.auth != null;
+      allow create: if request.auth != null &&
+        request.resource.data.raterId == request.auth.uid &&
+        request.resource.data.raterId != request.resource.data.ratedUserId;
     }
 
-    // Reports — admin read/update for moderation dashboard
+    // Reports — passengers/drivers can file; only admins can read or update
     match /reports/{reportId} {
-      allow read: if isAdmin();
-      allow update: if isAdmin();
+      allow create: if request.auth != null &&
+        request.resource.data.reporterId == request.auth.uid &&
+        request.resource.data.status == 'New';
+      allow read, update: if isAdmin();
     }
 
-    // Audit logs — admin append-only
+    // Audit logs — admin read; backend (Admin SDK) handles writes, bypassing rules
     match /auditLogs/{logId} {
-      allow create: if isAdmin();
+      allow read, create: if isAdmin();
+    }
+    
+    // Chats — Allow authenticated users to send, receive, and update (for read receipts & emojis)
+    match /chats/{chatId}/messages/{messageId} {
+      allow read, create, update: if request.auth != null;
+    }
+    
+    // Calls (Real-time signaling)
+    match /calls/{callId} {
+      allow read, write: if request.auth != null;
     }
   }
 }
