@@ -7,8 +7,9 @@
 
 import React, { useState, useEffect } from 'react';
 import { auth, db, firebaseReady } from './firebase';
-import { createUserWithEmailAndPassword, signInWithEmailAndPassword } from 'firebase/auth';
-import { doc, getDoc } from 'firebase/firestore';
+import { createUserWithEmailAndPassword, signInWithEmailAndPassword, updateProfile } from 'firebase/auth';
+import { doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
+import { FIRESTORE_COLLECTIONS } from './firestoreModel';
 import useIsDesktop from './hooks/useIsDesktop';
 import { buttons, colors, inputs, radius, shadows, typography } from './theme';
 /**
@@ -20,9 +21,11 @@ function Login({ onLoginSuccess }) {
   const [mode, setMode] = useState('home');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [fullName, setFullName] = useState('');
   const [message, setMessage] = useState('');
   const [emailFocus, setEmailFocus] = useState(false);
   const [passFocus, setPassFocus] = useState(false);
+  const [nameFocus, setNameFocus] = useState(false);
   const isDesktop = useIsDesktop();
   /**
    * Toggles the UI state between 'home', 'login', and 'register' modes.
@@ -34,6 +37,7 @@ function Login({ onLoginSuccess }) {
     setMessage('');
     setEmail('');
     setPassword('');
+    setFullName('');
   };
   /**
    * Handles the form submission for both Registration and Login flows.
@@ -49,6 +53,11 @@ function Login({ onLoginSuccess }) {
         setMessage('Demo mode: Firebase is not configured, so registration is disabled locally.');
         return;
       }
+      const trimmedName = fullName.trim();
+      if (trimmedName.length < 2) {
+        setMessage('Validation error: Please enter your full name (at least 2 characters).');
+        return;
+      }
       // Strict University Email Validation
       const normalised = email.trim().toLowerCase();
       const isAutEmail = normalised.endsWith('@aut.ac.nz') || normalised.endsWith('@autuni.ac.nz');
@@ -57,7 +66,20 @@ function Login({ onLoginSuccess }) {
         return;
       }
       try {
-        await createUserWithEmailAndPassword(auth, email, password);
+        const credential = await createUserWithEmailAndPassword(auth, email, password);
+        await updateProfile(credential.user, { displayName: trimmedName });
+        if (db) {
+          await setDoc(
+            doc(db, FIRESTORE_COLLECTIONS.users, credential.user.uid),
+            {
+              displayName: trimmedName,
+              email: credential.user.email,
+              createdAt: serverTimestamp(),
+              updatedAt: serverTimestamp(),
+            },
+            { merge: true },
+          );
+        }
         setMessage('Success! Account created. You can now log in.');
         switchMode('login');
       } catch (error) {
@@ -72,7 +94,7 @@ function Login({ onLoginSuccess }) {
         // USER STORY 2, TEST 2: Secure login
         const credential = await signInWithEmailAndPassword(auth, email, password);
         // Fetch user profile to check for admin suspensions
-        const userDoc = await getDoc(doc(db, 'users', credential.user.uid));
+        const userDoc = await getDoc(doc(db, FIRESTORE_COLLECTIONS.users, credential.user.uid));
         const data = userDoc.exists() ? userDoc.data() : {};
         if (data.accountStatus === 'Suspended') {
           await auth.signOut();
@@ -262,6 +284,22 @@ function Login({ onLoginSuccess }) {
       </div>
 
       <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+        {mode === 'register' && (
+          <div>
+            <label style={inputs.label}>Full name</label>
+            <input
+              type="text"
+              placeholder="e.g. Alex Taylor"
+              value={fullName}
+              onChange={(e) => setFullName(e.target.value)}
+              onFocus={() => setNameFocus(true)}
+              onBlur={() => setNameFocus(false)}
+              required
+              autoComplete="name"
+              style={{ ...inputs.field, ...(nameFocus ? inputs.fieldFocus : null) }}
+            />
+          </div>
+        )}
         <div>
           <label style={inputs.label}>University email</label>
           <input

@@ -9,6 +9,7 @@ import {
 } from '../firestoreModel';
 import { colors, radius, spacing, typography, surfaces, buttons, inputs, pills, shadows } from '../theme';
 import { AddressSearch, AUT_CAMPUSES } from '../components/MapComponents';
+import useSavedAddresses from '../hooks/useSavedAddresses';
 import * as turf from '@turf/turf';
 import { filterTripsByTimeOfDay } from '../utils/timeFilters';
 
@@ -38,6 +39,7 @@ const SearchTrips = ({ onTripSelect }) => {
   const [error, setError] = useState('');
   const [hasSearched, setHasSearched] = useState(false);
   const [timeFilter, setTimeFilter] = useState('All');
+  const { savedAddresses } = useSavedAddresses();
 
   const handleSearch = async (e) => {
     e.preventDefault();
@@ -119,10 +121,11 @@ const SearchTrips = ({ onTripSelect }) => {
       
       <form onSubmit={handleSearch} style={{ ...surfaces.card, padding: spacing.xl, marginBottom: spacing.xxl }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.lg, marginBottom: spacing.xl }}>
-          <AddressSearch 
-            label="Your Pickup Location" 
-            placeholder="e.g. 123 Main St" 
-            onSelect={setPassengerLocation} 
+          <AddressSearch
+            label="Your Pickup Location"
+            placeholder="e.g. 123 Main St"
+            onSelect={setPassengerLocation}
+            savedAddresses={savedAddresses}
           />
           
           <div>

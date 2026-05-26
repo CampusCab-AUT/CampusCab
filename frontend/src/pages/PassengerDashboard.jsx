@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import {
+  arrayUnion,
   collection,
   doc,
   getDoc,
@@ -17,6 +18,9 @@ import { registerBrowserPushToken } from '../utils/pushNotifications';
 import SearchTrips from './SearchTrips';
 import TripDetails from './TripDetails';
 import LeaveRatingModal from '../components/LeaveRatingModal';
+import ReportUserModal from '../components/ReportUserModal';
+import ChatWindow from '../components/ChatWindow';
+import { canViewChat } from '../utils/chatPermissions';
 
 function formatDeparture(departureTime) {
   if (!departureTime) return 'Departure time unavailable';
@@ -32,7 +36,6 @@ function formatDeparture(departureTime) {
  */
 function PassengerDashboard() {
   const [upcomingRides, setUpcomingRides] = useState([]);
-  const [pastRides] = useState([]);
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState('');
@@ -42,8 +45,12 @@ function PassengerDashboard() {
   const [pushMessage, setPushMessage] = useState('');
   const [viewingTrip, setViewingTrip] = useState(null);
   
-  const [ratingModalRide, setRatingModalRide] = useState(null); 
+  const [ratingModalRide, setRatingModalRide] = useState(null);
   const [ratedRideIds, setRatedRideIds] = useState([]);
+  const [reportModalRide, setReportModalRide] = useState(null);
+  const [reportedRideIds, setReportedRideIds] = useState([]);
+  const [footageFormState, setFootageFormState] = useState({});
+  const [chatModalRide, setChatModalRide] = useState(null);
 
   useEffect(() => {
     if (!firebaseReady || !auth || !db) {
@@ -241,6 +248,42 @@ function PassengerDashboard() {
     });
   };
 
+  function updateFootageForm(notifId, updates) {
+    setFootageFormState(prev => ({ ...prev, [notifId]: { ...prev[notifId], ...updates } }));
+  }
+
+  const handleSubmitFootage = async (notification) => {
+    const form = footageFormState[notification.id] || {};
+    if (!form.description?.trim() && !form.link?.trim()) {
+      updateFootageForm(notification.id, { error: 'Please describe the footage or provide a link.' });
+      return;
+    }
+    updateFootageForm(notification.id, { submitting: true, error: '' });
+    try {
+      const user = auth?.currentUser;
+      if (notification.relatedReportId && db) {
+        await updateDoc(doc(db, FIRESTORE_COLLECTIONS.reports, notification.relatedReportId), {
+          dashcamResponse: {
+            description: form.description?.trim() || '',
+            link: form.link?.trim() || '',
+            submittedBy: user?.email || user?.uid || 'User',
+            submittedAt: new Date().toISOString(),
+          },
+          activityLog: arrayUnion({
+            time: new Date().toISOString(),
+            action: 'Dashcam footage response submitted by reported user.',
+            by: user?.email || user?.uid || 'User',
+            type: 'note',
+          }),
+        });
+      }
+      await handleDismissNotification(notification.id);
+      updateFootageForm(notification.id, { open: false, submitting: false });
+    } catch (err) {
+      updateFootageForm(notification.id, { submitting: false, error: err.message || 'Submission failed. Try again.' });
+    }
+  };
+
   const handleCancelSeat = async () => {
     if (!rideToCancel) return;
 
@@ -308,13 +351,29 @@ function PassengerDashboard() {
   const now = new Date();
   
   const actualUpcomingRides = upcomingRides.filter(ride => {
-    if (!ride.trip?.departureTime) return false;
-    return new Date(ride.trip.departureTime) > now || ride.status === RIDE_REQUEST_STATUS.pending;
+    if (ride.status === RIDE_REQUEST_STATUS.pending) return true;
+    if (ride.status === RIDE_REQUEST_STATUS.approved) {
+      const tripStatus = ride.trip?.status;
+      if (tripStatus === 'completed' || tripStatus === 'cancelled') return false;
+      if (tripStatus === 'in_progress') return true;
+      if (ride.trip?.departureTime) {
+        return new Date(ride.trip.departureTime) > now;
+      }
+      return true;
+    }
+    return false;
   });
 
   const actualPastRides = upcomingRides.filter(ride => {
-    if (!ride.trip?.departureTime) return false;
-    return new Date(ride.trip.departureTime) <= now && ride.status === RIDE_REQUEST_STATUS.approved;
+    if (ride.status === RIDE_REQUEST_STATUS.approved) {
+      const tripStatus = ride.trip?.status;
+      if (tripStatus === 'completed') return true;
+      if (tripStatus === 'in_progress') return false;
+      if (ride.trip?.departureTime) {
+        return new Date(ride.trip.departureTime) <= now;
+      }
+    }
+    return false;
   });
 
   return (
@@ -326,42 +385,63 @@ function PassengerDashboard() {
 
       {notifications.length > 0 && (
         <section style={{ display: 'grid', gap: '10px', marginBottom: '24px' }}>
-          {notifications.map((notification) => (
-            <div
-              key={notification.id}
-              role="status"
-              style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                gap: '12px',
-                padding: '14px 16px',
-                border: '1px solid #fecaca',
-                borderRadius: '8px',
-                backgroundColor: '#fef2f2',
-                color: '#991b1b',
-                fontWeight: 700,
-              }}
-            >
-              <span>{notification.message || 'Your ride request update is ready.'}</span>
-              <button
-                type="button"
-                onClick={() => handleDismissNotification(notification.id)}
-                style={{
-                  border: '1px solid #fecaca',
-                  borderRadius: '8px',
-                  background: '#fff',
-                  color: '#991b1b',
-                  cursor: 'pointer',
-                  fontWeight: 700,
-                  padding: '8px 10px',
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                Mark read
-              </button>
-            </div>
-          ))}
+          {notifications.map((notification) => {
+            const ff = footageFormState[notification.id] || {};
+            const isFootageRequest = notification.type === 'admin_request';
+            return (
+              <div key={notification.id} role="status" style={{ border: '1px solid #fecaca', borderRadius: '8px', overflow: 'hidden' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', padding: '14px 16px', backgroundColor: '#fef2f2', color: '#991b1b', fontWeight: 700 }}>
+                  <span>{notification.message || 'Your ride request update is ready.'}</span>
+                  <div style={{ display: 'flex', gap: '8px', flexShrink: 0 }}>
+                    {isFootageRequest && (
+                      <button
+                        type="button"
+                        onClick={() => updateFootageForm(notification.id, { open: !ff.open })}
+                        style={{ border: 'none', borderRadius: '8px', background: '#991b1b', color: '#fff', cursor: 'pointer', fontWeight: 700, padding: '8px 12px', whiteSpace: 'nowrap', fontSize: '13px' }}
+                      >
+                        {ff.open ? 'Cancel' : 'Submit Footage'}
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => handleDismissNotification(notification.id)}
+                      style={{ border: '1px solid #fecaca', borderRadius: '8px', background: '#fff', color: '#991b1b', cursor: 'pointer', fontWeight: 700, padding: '8px 10px', whiteSpace: 'nowrap', fontSize: '13px' }}
+                    >
+                      Mark read
+                    </button>
+                  </div>
+                </div>
+                {isFootageRequest && ff.open && (
+                  <div style={{ background: '#fff', padding: '14px 16px', borderTop: '1px solid #fecaca', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                    <p style={{ margin: 0, fontSize: '13px', color: '#555' }}>Describe what the footage shows, or share a link (Google Drive, Dropbox, etc.).</p>
+                    <textarea
+                      placeholder="Describe what happened and what the footage shows…"
+                      value={ff.description || ''}
+                      onChange={e => updateFootageForm(notification.id, { description: e.target.value })}
+                      rows={3}
+                      style={{ width: '100%', padding: '8px 10px', border: '1px solid #fecaca', borderRadius: '6px', fontSize: '13px', fontFamily: 'inherit', resize: 'vertical', boxSizing: 'border-box', outline: 'none' }}
+                    />
+                    <input
+                      type="url"
+                      placeholder="Footage link (optional) — e.g. https://drive.google.com/…"
+                      value={ff.link || ''}
+                      onChange={e => updateFootageForm(notification.id, { link: e.target.value })}
+                      style={{ width: '100%', padding: '8px 10px', border: '1px solid #fecaca', borderRadius: '6px', fontSize: '13px', fontFamily: 'inherit', boxSizing: 'border-box', outline: 'none' }}
+                    />
+                    {ff.error && <p style={{ margin: 0, color: '#dc2626', fontSize: '12px' }}>{ff.error}</p>}
+                    <button
+                      type="button"
+                      onClick={() => handleSubmitFootage(notification)}
+                      disabled={ff.submitting}
+                      style={{ alignSelf: 'flex-start', padding: '9px 20px', border: 'none', borderRadius: '6px', background: '#991b1b', color: '#fff', fontSize: '13px', fontWeight: 700, cursor: ff.submitting ? 'wait' : 'pointer' }}
+                    >
+                      {ff.submitting ? 'Submitting…' : 'Submit Response'}
+                    </button>
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </section>
       )}
 
@@ -486,23 +566,78 @@ function PassengerDashboard() {
                         }}>
                           Status: {ride.status === RIDE_REQUEST_STATUS.pending ? 'Pending Approval' : 'Approved'}
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => setRideToCancel(ride)}
-                          disabled={cancellingRideId === ride.id}
-                          style={{
-                            marginTop: '12px',
-                            border: '1px solid #fecaca',
-                            borderRadius: '8px',
-                            backgroundColor: '#fff',
-                            color: '#b91c1c',
-                            cursor: cancellingRideId === ride.id ? 'wait' : 'pointer',
-                            fontWeight: 700,
-                            padding: '9px 12px',
-                          }}
-                        >
-                          {cancellingRideId === ride.id ? 'Cancelling...' : 'Cancel Seat'}
-                        </button>
+                        {ride.trip?.status === 'in_progress' && (
+                          <div style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            marginTop: '8px',
+                            padding: '6px 12px',
+                            backgroundColor: '#ecfdf5',
+                            color: '#059669',
+                            fontWeight: 'bold',
+                            fontSize: '0.85rem',
+                            borderRadius: '20px',
+                            border: '1px solid #10b98130',
+                            animation: 'pulse-slow 2s infinite'
+                          }}>
+                            <span style={{
+                              width: '8px',
+                              height: '8px',
+                              borderRadius: '50%',
+                              backgroundColor: '#10b981',
+                              display: 'inline-block',
+                              animation: 'ping 1.5s infinite'
+                            }} />
+                            <style>{`
+                              @keyframes pulse-slow {
+                                0%, 100% { opacity: 1; }
+                                50% { opacity: 0.8; }
+                              }
+                              @keyframes ping {
+                                0% { transform: scale(1); opacity: 1; }
+                                70%, 100% { transform: scale(2.2); opacity: 0; }
+                              }
+                            `}</style>
+                            🚗 Trip In Progress!
+                          </div>
+                        )}
+                        <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
+                          <button
+                            type="button"
+                            onClick={() => setRideToCancel(ride)}
+                            disabled={cancellingRideId === ride.id}
+                            style={{
+                              border: '1px solid #fecaca',
+                              borderRadius: '8px',
+                              backgroundColor: '#fff',
+                              color: '#b91c1c',
+                              cursor: cancellingRideId === ride.id ? 'wait' : 'pointer',
+                              fontWeight: 700,
+                              padding: '9px 12px',
+                            }}
+                          >
+                            {cancellingRideId === ride.id ? 'Cancelling...' : 'Cancel Seat'}
+                          </button>
+
+                          {canViewChat(ride.status) && (
+                            <button
+                              type="button"
+                              onClick={() => setChatModalRide(ride)}
+                              style={{
+                                border: '1px solid #0ea5e9',
+                                borderRadius: '8px',
+                                backgroundColor: '#0ea5e9',
+                                color: '#fff',
+                                cursor: 'pointer',
+                                fontWeight: 700,
+                                padding: '9px 12px',
+                              }}
+                            >
+                              Chat with Driver
+                            </button>
+                          )}
+                        </div>
                       </li>
                     ))}
                   </ul>
@@ -518,28 +653,45 @@ function PassengerDashboard() {
                   <ul style={{ listStyle: 'none', padding: 0 }}>
                     {actualPastRides.map(ride => {
                       const isRated = ratedRideIds.includes(ride.id) || ride.hasRated;
+                      const isReported = reportedRideIds.includes(ride.id);
                       return (
-                        <li key={`past-${ride.id}`} style={{ padding: '15px', border: '1px solid #eee', borderRadius: '5px', marginBottom: '10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <li key={`past-${ride.id}`} style={{ padding: '15px', border: '1px solid #eee', borderRadius: '5px', marginBottom: '10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
                           <div>
                             <strong>{ride.trip?.destination || 'Unknown destination'}</strong>
                             <div style={{ color: '#555', fontSize: '0.9rem' }}>{formatDeparture(ride.trip?.departureTime)}</div>
                           </div>
-                          
-                          <button 
-                            onClick={() => setRatingModalRide(ride)}
-                            disabled={isRated}
-                            style={{
-                              padding: '8px 16px',
-                              borderRadius: '8px',
-                              border: 'none',
-                              backgroundColor: isRated ? '#e5e7eb' : '#2563eb',
-                              color: isRated ? '#9ca3af' : '#fff',
-                              cursor: isRated ? 'not-allowed' : 'pointer',
-                              fontWeight: 'bold'
-                            }}
-                          >
-                            {isRated ? 'Rated ★' : 'Leave Rating'}
-                          </button>
+                          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                            <button
+                              onClick={() => setRatingModalRide(ride)}
+                              disabled={isRated}
+                              style={{
+                                padding: '8px 16px',
+                                borderRadius: '8px',
+                                border: 'none',
+                                backgroundColor: isRated ? '#e5e7eb' : '#2563eb',
+                                color: isRated ? '#9ca3af' : '#fff',
+                                cursor: isRated ? 'not-allowed' : 'pointer',
+                                fontWeight: 'bold'
+                              }}
+                            >
+                              {isRated ? 'Rated ★' : 'Leave Rating'}
+                            </button>
+                            <button
+                              onClick={() => setReportModalRide(ride)}
+                              disabled={isReported}
+                              style={{
+                                padding: '8px 16px',
+                                borderRadius: '8px',
+                                border: '1px solid rgba(220, 38, 38, 0.35)',
+                                backgroundColor: isReported ? '#f3f4f6' : '#fff',
+                                color: isReported ? '#9ca3af' : '#dc2626',
+                                cursor: isReported ? 'not-allowed' : 'pointer',
+                                fontWeight: 'bold'
+                              }}
+                            >
+                              {isReported ? 'Reported' : 'Report Driver'}
+                            </button>
+                          </div>
                         </li>
                       );
                     })}
@@ -547,14 +699,32 @@ function PassengerDashboard() {
                 )}
               </div>
 
-              {/* Render the Rating Modal if active */}
               {ratingModalRide && (
-                <LeaveRatingModal 
-                  ride={ratingModalRide} 
+                <LeaveRatingModal
+                  ride={ratingModalRide}
                   onClose={() => setRatingModalRide(null)}
                   onRatingSubmitted={(rideId) => {
                     setRatedRideIds(prev => [...prev, rideId]);
                   }}
+                />
+              )}
+
+              {reportModalRide && (
+                <ReportUserModal
+                  reportedUserId={reportModalRide.tripOwnerId || reportModalRide.trip?.driverId}
+                  reportedUserName={reportModalRide.trip?.driverName || 'Driver'}
+                  reporterId={auth.currentUser?.uid}
+                  tripId={reportModalRide.tripId}
+                  onClose={() => setReportModalRide(null)}
+                  onReported={() => setReportedRideIds(prev => [...prev, reportModalRide.id])}
+                />
+              )}
+
+              {chatModalRide && (
+                <ChatWindow
+                  rideRequest={chatModalRide}
+                  currentUser={auth.currentUser}
+                  onClose={() => setChatModalRide(null)}
                 />
               )}
             </>

@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
 import { auth, db } from './firebase';
+import useSuspensionGuard from './hooks/useSuspensionGuard';
 import Login from './Login';
 import VehicleProfile from './VehicleProfile';
 import CreateTrip from './CreateTrip';
@@ -10,6 +11,7 @@ import AdminDashboard from './pages/AdminDashboard';
 import { FIRESTORE_COLLECTIONS } from './firestoreModel';
 import useIsDesktop from './hooks/useIsDesktop';
 import DriverDashboard from './pages/DriverDashboard';
+import DriverTripView from './components/DriverTripView';
 import PassengerDashboard from './pages/PassengerDashboard';
 import UserProfilePanel from './components/UserProfilePanel';
 import Stepper from './components/Stepper';
@@ -461,6 +463,7 @@ function DriverExperience() {
   const [vehicle, setVehicle] = useState(null);
   const [loading, setLoading] = useState(true);
   const [onboardingComplete, setOnboardingComplete] = useState(false);
+  const [liveTripId, setLiveTripId] = useState(null);
   const isDesktop = useIsDesktop();
 
   useEffect(() => {
@@ -516,6 +519,10 @@ function DriverExperience() {
     );
   }
 
+  if (liveTripId) {
+    return <DriverTripView tripId={liveTripId} onBackToDashboard={() => setLiveTripId(null)} />;
+  }
+
   return (
     <div
       style={{
@@ -524,6 +531,45 @@ function DriverExperience() {
         gridTemplateColumns: isDesktop ? 'repeat(2, minmax(0, 1fr))' : '1fr',
       }}
     >
+      <section 
+        style={{ 
+          gridColumn: isDesktop ? '1 / -1' : 'auto', 
+          ...surfaces.card, 
+          padding: '24px', 
+          background: colors.accentGradient, 
+          color: 'white', 
+          display: 'flex', 
+          justifyContent: 'space-between', 
+          alignItems: 'center', 
+          flexWrap: 'wrap', 
+          gap: '16px' 
+        }}
+      >
+        <div>
+          <h3 style={{ margin: 0, fontSize: '1.2rem', fontWeight: 900, color: 'white', letterSpacing: '-0.01em' }}>Demo Live Trip View</h3>
+          <p style={{ margin: '4px 0 0', opacity: 0.88, fontSize: '0.86rem', fontWeight: 600 }}>Test the mobile-first trip state manager with accessible start/end controls.</p>
+        </div>
+        <button 
+          onClick={() => setLiveTripId('demo')} 
+          style={{ 
+            border: 'none', 
+            borderRadius: radius.pill, 
+            padding: '12px 24px', 
+            background: 'white', 
+            color: colors.accent, 
+            fontWeight: 800, 
+            cursor: 'pointer',
+            boxShadow: '0 8px 20px rgba(15, 118, 110, 0.25)',
+            fontSize: '0.9rem',
+            transition: 'transform 0.15s ease'
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.transform = 'scale(1.02)'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.transform = 'scale(1)'; }}
+        >
+          Open Live View
+        </button>
+      </section>
+
       <Card padding="0">
         <VehicleProfile initialVehicle={vehicle} onSaved={setVehicle} compact />
       </Card>
@@ -531,7 +577,7 @@ function DriverExperience() {
         <CreateTrip />
       </Card>
       <section style={{ ...surfaces.card, padding: 0, overflow: 'hidden', gridColumn: isDesktop ? '1 / -1' : 'auto' }}>
-        <DriverDashboard />
+        <DriverDashboard onOpenLiveTrip={(tripId) => setLiveTripId(tripId)} />
       </section>
     </div>
   );
@@ -568,6 +614,56 @@ function DashboardPlaceholder({ role }) {
   );
 }
 
+function SuspendedScreen({ reason, duration, onDismiss }) {
+  return (
+    <div style={{
+      minHeight: '100vh',
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      justifyContent: 'center',
+      background: '#fff5f5',
+      padding: '24px',
+    }}>
+      <div style={{
+        background: 'white',
+        borderRadius: 16,
+        padding: '40px 32px',
+        maxWidth: 480,
+        width: '100%',
+        boxShadow: '0 8px 32px rgba(0,0,0,0.12)',
+        textAlign: 'center',
+        border: '1px solid #f5c2c7',
+      }}>
+        <div style={{ fontSize: '3rem', marginBottom: 16 }}>🚫</div>
+        <h2 style={{ color: '#dc3545', marginTop: 0, marginBottom: 8 }}>Account Suspended</h2>
+        <p style={{ color: '#444', marginBottom: 8 }}>Your account has been suspended.</p>
+        <p style={{ color: '#444', marginBottom: 8 }}>
+          <strong>Reason:</strong> {reason}
+        </p>
+        <p style={{ color: '#444', marginBottom: 24 }}>
+          <strong>Duration:</strong> {duration}
+        </p>
+        <button
+          onClick={onDismiss}
+          style={{
+            padding: '12px 28px',
+            borderRadius: 8,
+            border: 'none',
+            background: '#dc3545',
+            color: 'white',
+            fontWeight: 700,
+            fontSize: 14,
+            cursor: 'pointer',
+          }}
+        >
+          Return to login
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(() => {
     if (auth) {
@@ -577,6 +673,8 @@ function App() {
   });
   const [authLoading, setAuthLoading] = useState(Boolean(auth));
   const [selectedRole, setSelectedRole] = useState('driver');
+  const [currentUid, setCurrentUid] = useState(null);
+  const { suspensionInfo, dismiss } = useSuspensionGuard(currentUid);
 
   useEffect(() => {
     if (!auth) {
@@ -585,6 +683,7 @@ function App() {
 
     return onAuthStateChanged(auth, (user) => {
       setIsAuthenticated(Boolean(user));
+      setCurrentUid(user?.uid || null);
       setAuthLoading(false);
     });
   }, []);
@@ -620,6 +719,16 @@ function App() {
       >
         Loading your session...
       </div>
+    );
+  }
+
+  if (suspensionInfo) {
+    return (
+      <SuspendedScreen
+        reason={suspensionInfo.reason}
+        duration={suspensionInfo.duration}
+        onDismiss={dismiss}
+      />
     );
   }
 

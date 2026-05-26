@@ -1,11 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { updateProfile } from 'firebase/auth';
 import { auth, db, storage, firebaseReady } from '../firebase';
 import { FIRESTORE_COLLECTIONS } from '../firestoreModel';
 import { colors, radius, spacing, typography, surfaces, buttons, inputs } from '../theme';
+import SavedAddresses from './SavedAddresses';
 
 export default function UserProfilePanel() {
+  const [displayName, setDisplayName] = useState('');
   const [bio, setBio] = useState('');
   const [avatarUrl, setAvatarUrl] = useState(null);
   const [avatarPreview, setAvatarPreview] = useState(null);
@@ -26,11 +29,10 @@ export default function UserProfilePanel() {
         try {
           const userDocRef = doc(db, FIRESTORE_COLLECTIONS.users, user.uid);
           const userSnap = await getDoc(userDocRef);
-          if (userSnap.exists()) {
-            const data = userSnap.data();
-            if (data.bio) setBio(data.bio);
-            if (data.avatarUrl) setAvatarUrl(data.avatarUrl);
-          }
+          const data = userSnap.exists() ? userSnap.data() : {};
+          setDisplayName(data.displayName || user.displayName || '');
+          if (data.bio) setBio(data.bio);
+          if (data.avatarUrl) setAvatarUrl(data.avatarUrl);
         } catch (error) {
           console.error("Error loading profile:", error);
         }
@@ -66,6 +68,12 @@ export default function UserProfilePanel() {
       return;
     }
 
+    const trimmedName = displayName.trim();
+    if (trimmedName.length < 2) {
+      setMessage({ text: 'Please enter your full name (at least 2 characters).', type: 'error' });
+      return;
+    }
+
     setLoading(true);
     setMessage({ text: '', type: '' });
 
@@ -76,15 +84,20 @@ export default function UserProfilePanel() {
       if (avatarFile) {
         const fileExtension = avatarFile.name.split('.').pop();
         const avatarStorageRef = storageRef(storage, `avatars/${user.uid}.${fileExtension}`);
-        
+
         await uploadBytes(avatarStorageRef, avatarFile);
         finalAvatarUrl = await getDownloadURL(avatarStorageRef);
         setAvatarUrl(finalAvatarUrl);
       }
 
+      if (trimmedName !== (user.displayName || '')) {
+        await updateProfile(user, { displayName: trimmedName });
+      }
+
       // Save to Firestore
       const userDocRef = doc(db, FIRESTORE_COLLECTIONS.users, user.uid);
       await setDoc(userDocRef, {
+        displayName: trimmedName,
         bio,
         avatarUrl: finalAvatarUrl,
         updatedAt: serverTimestamp(),
@@ -163,6 +176,24 @@ export default function UserProfilePanel() {
           <span style={{ ...typography.small, color: colors.textSubtle }}>Click image to upload new photo (Max 5MB)</span>
         </div>
 
+        {/* Name Section */}
+        <div style={{ marginBottom: spacing.lg }}>
+          <label htmlFor="displayName" style={{ ...inputs.label }}>Full Name</label>
+          <input
+            id="displayName"
+            type="text"
+            value={displayName}
+            onChange={(e) => setDisplayName(e.target.value)}
+            placeholder="e.g. Alex Taylor"
+            autoComplete="name"
+            maxLength={60}
+            style={{ ...inputs.field }}
+          />
+          <div style={{ ...typography.small, color: colors.textSubtle, marginTop: '4px' }}>
+            This is the name drivers and passengers will see.
+          </div>
+        </div>
+
         {/* Bio Section */}
         <div style={{ marginBottom: spacing.xl }}>
           <label htmlFor="bio" style={{ ...inputs.label }}>About Me</label>
@@ -209,6 +240,10 @@ export default function UserProfilePanel() {
           {loading ? 'Saving Profile...' : 'Save Profile'}
         </button>
       </form>
+
+      <div style={{ ...surfaces.card, padding: spacing.xl, marginTop: spacing.xl }}>
+        <SavedAddresses />
+      </div>
     </div>
   );
 }

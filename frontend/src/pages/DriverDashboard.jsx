@@ -1,7 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
+  arrayUnion,
   collection,
   doc,
+  getDoc,
   onSnapshot,
   query,
   runTransaction,
@@ -19,10 +21,510 @@ import {
 import useIsDesktop from '../hooks/useIsDesktop';
 import { buttons, colors, pills, radius, shadows, typography } from '../theme';
 import { registerBrowserPushToken } from '../utils/pushNotifications';
+import ReportUserModal from '../components/ReportUserModal';
+import ChatWindow from '../components/ChatWindow';
+import { canViewChat } from '../utils/chatPermissions';
 
 function getTripTimeValue(trip) {
   const date = trip.createdAt?.toDate?.() || new Date(trip.createdAt || trip.departureTime || 0);
   return Number.isNaN(date.getTime()) ? 0 : date.getTime();
+}
+
+function getInitials(name) {
+  if (!name) return '?';
+  const parts = String(name).trim().split(/\s+/).slice(0, 2);
+  return parts.map((p) => p[0]?.toUpperCase() || '').join('') || '?';
+}
+
+function PassengerAvatar({ src, name, size = 36 }) {
+  const dim = `${size}px`;
+  if (src) {
+    return (
+      <img
+        src={src}
+        alt={name || 'Passenger avatar'}
+        style={{
+          width: dim,
+          height: dim,
+          borderRadius: '50%',
+          objectFit: 'cover',
+          flexShrink: 0,
+          border: '1px solid rgba(0,0,0,0.08)',
+        }}
+      />
+    );
+  }
+  return (
+    <div
+      aria-hidden="true"
+      style={{
+        width: dim,
+        height: dim,
+        borderRadius: '50%',
+        backgroundColor: 'rgba(29, 78, 216, 0.12)',
+        color: '#1d4ed8',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        fontSize: `${Math.max(12, Math.floor(size * 0.4))}px`,
+        fontWeight: 700,
+        flexShrink: 0,
+      }}
+    >
+      {getInitials(name)}
+    </div>
+  );
+}
+
+function TripPassengersModal({ trip, approvedRequests, passengerProfiles, onClose }) {
+  const [entered, setEntered] = useState(false);
+
+  useEffect(() => {
+    const id = requestAnimationFrame(() => setEntered(true));
+    return () => cancelAnimationFrame(id);
+  }, []);
+
+  useEffect(() => {
+    const onKey = (event) => {
+      if (event.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [onClose]);
+
+  const remainingSeats = Number.isFinite(trip.availableSeats) ? trip.availableSeats : trip.seats;
+  const totalSeats = trip.seats ?? 0;
+  const isFull = (trip.status || '').toLowerCase() === TRIP_STATUS.full || remainingSeats === 0;
+
+  return (
+    <div
+      role="presentation"
+      onClick={onClose}
+      style={{
+        position: 'fixed',
+        inset: 0,
+        backgroundColor: 'rgba(15, 23, 42, 0.6)',
+        backdropFilter: 'blur(6px)',
+        WebkitBackdropFilter: 'blur(6px)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '20px',
+        zIndex: 80,
+        opacity: entered ? 1 : 0,
+        transition: 'opacity 180ms ease',
+      }}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="trip-passengers-title"
+        onClick={(event) => event.stopPropagation()}
+        style={{
+          backgroundColor: '#fff',
+          borderRadius: '22px',
+          width: '100%',
+          maxWidth: '560px',
+          maxHeight: '88vh',
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden',
+          boxShadow: '0 40px 100px -20px rgba(15, 23, 42, 0.55), 0 8px 24px -8px rgba(15, 23, 42, 0.25)',
+          transform: entered ? 'translateY(0) scale(1)' : 'translateY(12px) scale(0.97)',
+          opacity: entered ? 1 : 0,
+          transition: 'transform 220ms cubic-bezier(0.16, 1, 0.3, 1), opacity 220ms ease',
+        }}
+      >
+        <div
+          style={{
+            position: 'relative',
+            padding: '26px 26px 22px',
+            background: colors.accentGradient,
+            color: '#fff',
+            overflow: 'hidden',
+          }}
+        >
+          <div
+            aria-hidden="true"
+            style={{
+              position: 'absolute',
+              top: '-60px',
+              right: '-40px',
+              width: '220px',
+              height: '220px',
+              borderRadius: '50%',
+              background: 'radial-gradient(circle, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0) 70%)',
+              pointerEvents: 'none',
+            }}
+          />
+          <div
+            aria-hidden="true"
+            style={{
+              position: 'absolute',
+              bottom: '-80px',
+              left: '-50px',
+              width: '200px',
+              height: '200px',
+              borderRadius: '50%',
+              background: 'radial-gradient(circle, rgba(255,255,255,0.12) 0%, rgba(255,255,255,0) 70%)',
+              pointerEvents: 'none',
+            }}
+          />
+
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            style={{
+              position: 'absolute',
+              top: '16px',
+              right: '16px',
+              width: '34px',
+              height: '34px',
+              borderRadius: '50%',
+              border: '1px solid rgba(255,255,255,0.25)',
+              background: 'rgba(255,255,255,0.14)',
+              color: '#fff',
+              cursor: 'pointer',
+              fontSize: '17px',
+              fontWeight: 700,
+              lineHeight: 1,
+              backdropFilter: 'blur(4px)',
+              transition: 'background-color 0.15s ease',
+              zIndex: 2,
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.28)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.14)';
+            }}
+          >
+            ✕
+          </button>
+
+          <div style={{ position: 'relative', zIndex: 1 }}>
+            <div
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                fontSize: '0.7rem',
+                fontWeight: 800,
+                letterSpacing: '0.14em',
+                textTransform: 'uppercase',
+                padding: '5px 10px',
+                borderRadius: radius.pill,
+                background: 'rgba(255,255,255,0.18)',
+                color: '#fff',
+                marginBottom: '14px',
+              }}
+            >
+              <span aria-hidden="true">●</span> Trip details
+            </div>
+            <h2
+              id="trip-passengers-title"
+              style={{
+                margin: 0,
+                fontSize: '1.4rem',
+                fontWeight: 900,
+                lineHeight: 1.25,
+                color: '#fff',
+                letterSpacing: '-0.01em',
+              }}
+            >
+              {trip.origin || 'Unknown origin'}
+              <span style={{ opacity: 0.7, margin: '0 8px' }} aria-hidden="true">→</span>
+              {trip.destination || 'Unknown destination'}
+            </h2>
+            <div
+              style={{
+                marginTop: '8px',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                fontSize: '0.88rem',
+                opacity: 0.92,
+                fontWeight: 600,
+              }}
+            >
+              <span aria-hidden="true">🗓</span>
+              <span>{formatTripDeparture(trip.departureTime)}</span>
+            </div>
+          </div>
+        </div>
+
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+            gap: '10px',
+            padding: '18px 22px 4px',
+          }}
+        >
+          {[
+            { label: 'Seats left', value: remainingSeats ?? '—' },
+            { label: 'Total seats', value: totalSeats || '—' },
+            { label: 'Status', value: isFull ? 'Full' : trip.status || TRIP_STATUS.active },
+          ].map((stat) => (
+            <div
+              key={stat.label}
+              style={{
+                padding: '12px 14px',
+                borderRadius: radius.md,
+                backgroundColor: colors.surfaceMuted,
+                border: `1px solid ${colors.border}`,
+              }}
+            >
+              <div
+                style={{
+                  fontSize: '0.66rem',
+                  fontWeight: 800,
+                  letterSpacing: '0.1em',
+                  textTransform: 'uppercase',
+                  color: colors.textSubtle,
+                  marginBottom: '4px',
+                }}
+              >
+                {stat.label}
+              </div>
+              <div
+                style={{
+                  fontSize: '1.05rem',
+                  fontWeight: 800,
+                  color: colors.text,
+                  textTransform: stat.label === 'Status' ? 'capitalize' : 'none',
+                }}
+              >
+                {stat.value}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div
+          style={{
+            padding: '14px 22px 22px',
+            overflowY: 'auto',
+            minHeight: 0,
+            flex: 1,
+          }}
+        >
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              marginBottom: '12px',
+            }}
+          >
+            <h3
+              style={{
+                margin: 0,
+                fontSize: '0.95rem',
+                fontWeight: 800,
+                color: colors.text,
+                letterSpacing: '-0.005em',
+              }}
+            >
+              Approved passengers
+            </h3>
+            <span
+              style={{
+                fontSize: '0.72rem',
+                fontWeight: 800,
+                padding: '4px 10px',
+                borderRadius: radius.pill,
+                background: 'rgba(21, 128, 61, 0.12)',
+                color: colors.success,
+                border: '1px solid rgba(21, 128, 61, 0.22)',
+              }}
+            >
+              {approvedRequests.length}
+            </span>
+          </div>
+
+          {approvedRequests.length === 0 ? (
+            <div
+              style={{
+                padding: '40px 20px',
+                borderRadius: radius.lg,
+                border: `1.5px dashed ${colors.borderStrong}`,
+                backgroundColor: colors.surfaceMuted,
+                textAlign: 'center',
+              }}
+            >
+              <div
+                aria-hidden="true"
+                style={{
+                  width: '56px',
+                  height: '56px',
+                  margin: '0 auto 12px',
+                  borderRadius: '50%',
+                  background: 'linear-gradient(135deg, rgba(29, 78, 216, 0.12), rgba(15, 118, 110, 0.12))',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '24px',
+                }}
+              >
+                👥
+              </div>
+              <div style={{ fontWeight: 800, color: colors.text, marginBottom: '4px' }}>
+                No passengers yet
+              </div>
+              <div style={{ fontSize: '0.86rem', color: colors.textSubtle }}>
+                Approved passengers will appear here once you accept their requests.
+              </div>
+            </div>
+          ) : (
+            <ul
+              style={{
+                listStyle: 'none',
+                padding: 0,
+                margin: 0,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '8px',
+              }}
+            >
+              {approvedRequests.map((request) => {
+                const profile = passengerProfiles[request.passengerId] || {};
+                const name =
+                  profile.displayName ||
+                  request.passengerName ||
+                  request.passengerEmail ||
+                  'Passenger';
+                return (
+                  <li
+                    key={request.id}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '14px',
+                      padding: '12px 14px',
+                      borderRadius: radius.lg,
+                      backgroundColor: colors.surfaceSolid,
+                      border: `1px solid ${colors.border}`,
+                      transition: 'background-color 0.15s ease, border-color 0.15s ease, transform 0.15s ease',
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.backgroundColor = colors.surfaceMuted;
+                      e.currentTarget.style.borderColor = 'rgba(29, 78, 216, 0.2)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.backgroundColor = colors.surfaceSolid;
+                      e.currentTarget.style.borderColor = colors.border;
+                    }}
+                  >
+                    <div
+                      style={{
+                        position: 'relative',
+                        padding: '2px',
+                        borderRadius: '50%',
+                        background: colors.accentGradient,
+                        flexShrink: 0,
+                      }}
+                    >
+                      <div style={{ background: '#fff', borderRadius: '50%', padding: '2px' }}>
+                        <PassengerAvatar src={profile.avatarUrl} name={name} size={44} />
+                      </div>
+                    </div>
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <div
+                        style={{
+                          margin: 0,
+                          fontWeight: 800,
+                          fontSize: '0.95rem',
+                          color: colors.text,
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {name}
+                      </div>
+                      {request.passengerEmail ? (
+                        <div
+                          style={{
+                            margin: '2px 0 0',
+                            fontSize: '0.8rem',
+                            color: colors.textSubtle,
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          {request.passengerEmail}
+                        </div>
+                      ) : null}
+                    </div>
+                    {request.seatsRequested ? (
+                      <span
+                        style={{
+                          flexShrink: 0,
+                          fontSize: '0.72rem',
+                          fontWeight: 800,
+                          padding: '5px 9px',
+                          borderRadius: radius.pill,
+                          background: 'rgba(29, 78, 216, 0.08)',
+                          color: colors.info,
+                          border: '1px solid rgba(29, 78, 216, 0.18)',
+                        }}
+                      >
+                        {request.seatsRequested} seat{request.seatsRequested > 1 ? 's' : ''}
+                      </span>
+                    ) : null}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+
+        <div
+          style={{
+            padding: '14px 22px 18px',
+            borderTop: `1px solid ${colors.border}`,
+            backgroundColor: colors.surfaceMuted,
+          }}
+        >
+          <button
+            type="button"
+            onClick={onClose}
+            style={{
+              width: '100%',
+              border: 'none',
+              borderRadius: radius.pill,
+              padding: '12px 18px',
+              fontSize: '0.92rem',
+              fontWeight: 800,
+              cursor: 'pointer',
+              background: colors.accentGradient,
+              color: '#fff',
+              boxShadow: '0 8px 22px -6px rgba(15, 118, 110, 0.45)',
+              transition: 'transform 0.15s ease, box-shadow 0.15s ease',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.transform = 'translateY(-1px)';
+              e.currentTarget.style.boxShadow = '0 12px 28px -6px rgba(15, 118, 110, 0.55)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.transform = '';
+              e.currentTarget.style.boxShadow = '0 8px 22px -6px rgba(15, 118, 110, 0.45)';
+            }}
+          >
+            Done
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function formatTripDeparture(departureTime) {
@@ -37,7 +539,7 @@ function formatTripDeparture(departureTime) {
   });
 }
 
-function DriverDashboard() {
+function DriverDashboard({ onOpenLiveTrip }) {
   const [trips, setTrips] = useState([]);
   const [requests, setRequests] = useState([]);
   const [notifications, setNotifications] = useState([]);
@@ -45,8 +547,14 @@ function DriverDashboard() {
   const [busyRequestId, setBusyRequestId] = useState('');
   const [busyTripId, setBusyTripId] = useState('');
   const [tripToCancel, setTripToCancel] = useState(null);
+  const [reportTarget, setReportTarget] = useState(null);
+  const [reportedPassengerIds, setReportedPassengerIds] = useState([]);
+  const [passengerProfiles, setPassengerProfiles] = useState({});
+  const [selectedTripId, setSelectedTripId] = useState(null);
+  const [footageFormState, setFootageFormState] = useState({});
   const [pushStatus, setPushStatus] = useState('idle');
   const [pushMessage, setPushMessage] = useState('');
+  const [chatModalRide, setChatModalRide] = useState(null);
   const isDesktop = useIsDesktop();
 
   useEffect(() => {
@@ -187,7 +695,11 @@ function DriverDashboard() {
       trips
         .filter((trip) => {
           const status = (trip.status || TRIP_STATUS.active).toLowerCase();
-          return status === TRIP_STATUS.active || status === TRIP_STATUS.full;
+          return (
+            status === TRIP_STATUS.active ||
+            status === TRIP_STATUS.full ||
+            status === 'in_progress'
+          );
         })
         .sort((a, b) => getTripTimeValue(b) - getTripTimeValue(a)),
     [trips],
@@ -205,6 +717,53 @@ function DriverDashboard() {
     () => requests.filter((request) => (request.status || '').toLowerCase() === RIDE_REQUEST_STATUS.approved),
     [requests],
   );
+
+  const approvedByTripId = useMemo(() => {
+    const map = {};
+    for (const request of approvedRequests) {
+      if (!request.tripId) continue;
+      if (!map[request.tripId]) map[request.tripId] = [];
+      map[request.tripId].push(request);
+    }
+    return map;
+  }, [approvedRequests]);
+
+  useEffect(() => {
+    if (!firebaseReady || !db) return undefined;
+    const missingIds = Array.from(
+      new Set(
+        approvedRequests
+          .map((request) => request.passengerId)
+          .filter((id) => id && !(id in passengerProfiles)),
+      ),
+    );
+    if (missingIds.length === 0) return undefined;
+
+    let cancelled = false;
+    (async () => {
+      const entries = await Promise.all(
+        missingIds.map(async (passengerId) => {
+          try {
+            const snap = await getDoc(doc(db, FIRESTORE_COLLECTIONS.users, passengerId));
+            const data = snap.exists() ? snap.data() : {};
+            return [passengerId, { displayName: data.displayName || '', avatarUrl: data.avatarUrl || '' }];
+          } catch {
+            return [passengerId, { displayName: '', avatarUrl: '' }];
+          }
+        }),
+      );
+      if (cancelled) return;
+      setPassengerProfiles((prev) => {
+        const next = { ...prev };
+        for (const [id, profile] of entries) next[id] = profile;
+        return next;
+      });
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [approvedRequests, passengerProfiles]);
 
   const unreadNotifications = useMemo(
     () =>
@@ -233,6 +792,42 @@ function DriverDashboard() {
       });
     } catch (error) {
       setMessage(`Error: ${error.message}`);
+    }
+  };
+
+  function updateFootageForm(notifId, updates) {
+    setFootageFormState(prev => ({ ...prev, [notifId]: { ...prev[notifId], ...updates } }));
+  }
+
+  const handleSubmitFootage = async (notification) => {
+    const form = footageFormState[notification.id] || {};
+    if (!form.description?.trim() && !form.link?.trim()) {
+      updateFootageForm(notification.id, { error: 'Please describe the footage or provide a link.' });
+      return;
+    }
+    updateFootageForm(notification.id, { submitting: true, error: '' });
+    try {
+      const user = auth?.currentUser;
+      if (notification.relatedReportId && db) {
+        await updateDoc(doc(db, FIRESTORE_COLLECTIONS.reports, notification.relatedReportId), {
+          dashcamResponse: {
+            description: form.description?.trim() || '',
+            link: form.link?.trim() || '',
+            submittedBy: user?.email || user?.uid || 'User',
+            submittedAt: new Date().toISOString(),
+          },
+          activityLog: arrayUnion({
+            time: new Date().toISOString(),
+            action: 'Dashcam footage response submitted by reported user.',
+            by: user?.email || user?.uid || 'User',
+            type: 'note',
+          }),
+        });
+      }
+      await handleDismissNotification(notification.id);
+      updateFootageForm(notification.id, { open: false, submitting: false });
+    } catch (err) {
+      updateFootageForm(notification.id, { submitting: false, error: err.message || 'Submission failed. Try again.' });
     }
   };
 
@@ -620,43 +1215,65 @@ function DriverDashboard() {
             marginBottom: '4px',
           }}
         >
-          {unreadNotifications.map((notification) => (
-            <div
-              key={notification.id}
-              role="status"
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                gap: '12px',
-                padding: '12px 14px',
-                borderRadius: radius.md,
-                backgroundColor: colors.warningSoft,
-                border: '1px solid rgba(217, 119, 6, 0.24)',
-                color: colors.warning,
-                fontWeight: 700,
-              }}
-            >
-              <span>
-                {notification.message ||
-                  `${notification.passengerName || 'A passenger'} requested ${notification.seatsRequested || 1} seat(s).`}
-              </span>
-              <button
-                type="button"
-                onClick={() => handleDismissNotification(notification.id)}
-                style={{
-                  ...buttons.ghost,
-                  padding: '7px 10px',
-                  minHeight: 'auto',
-                  color: colors.warning,
-                  borderColor: 'rgba(217, 119, 6, 0.28)',
-                  flexShrink: 0,
-                }}
-              >
-                Mark read
-              </button>
-            </div>
-          ))}
+          {unreadNotifications.map((notification) => {
+            const ff = footageFormState[notification.id] || {};
+            const isFootageRequest = notification.type === 'admin_request';
+            return (
+              <div key={notification.id} role="status" style={{ borderRadius: radius.md, border: '1px solid rgba(217,119,6,0.24)', overflow: 'hidden' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', padding: '12px 14px', backgroundColor: colors.warningSoft, color: colors.warning, fontWeight: 700 }}>
+                  <span>
+                    {notification.message || `${notification.passengerName || 'A passenger'} requested ${notification.seatsRequested || 1} seat(s).`}
+                  </span>
+                  <div style={{ display: 'flex', gap: '8px', flexShrink: 0 }}>
+                    {isFootageRequest && (
+                      <button
+                        type="button"
+                        onClick={() => updateFootageForm(notification.id, { open: !ff.open })}
+                        style={{ ...buttons.ghost, padding: '7px 12px', minHeight: 'auto', background: colors.warning, color: '#fff', borderColor: colors.warning, fontSize: '13px' }}
+                      >
+                        {ff.open ? 'Cancel' : 'Submit Footage'}
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => handleDismissNotification(notification.id)}
+                      style={{ ...buttons.ghost, padding: '7px 10px', minHeight: 'auto', color: colors.warning, borderColor: 'rgba(217,119,6,0.28)', flexShrink: 0 }}
+                    >
+                      Mark read
+                    </button>
+                  </div>
+                </div>
+                {isFootageRequest && ff.open && (
+                  <div style={{ background: '#fff', padding: '14px', borderTop: '1px solid rgba(217,119,6,0.24)', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                    <p style={{ margin: 0, fontSize: '13px', color: '#555' }}>Describe what the footage shows, or share a link (Google Drive, Dropbox, etc.).</p>
+                    <textarea
+                      placeholder="Describe what happened and what the footage shows…"
+                      value={ff.description || ''}
+                      onChange={e => updateFootageForm(notification.id, { description: e.target.value })}
+                      rows={3}
+                      style={{ width: '100%', padding: '8px 10px', border: '1px solid rgba(217,119,6,0.3)', borderRadius: '6px', fontSize: '13px', fontFamily: 'inherit', resize: 'vertical', boxSizing: 'border-box', outline: 'none' }}
+                    />
+                    <input
+                      type="url"
+                      placeholder="Footage link (optional) — e.g. https://drive.google.com/…"
+                      value={ff.link || ''}
+                      onChange={e => updateFootageForm(notification.id, { link: e.target.value })}
+                      style={{ width: '100%', padding: '8px 10px', border: '1px solid rgba(217,119,6,0.3)', borderRadius: '6px', fontSize: '13px', fontFamily: 'inherit', boxSizing: 'border-box', outline: 'none' }}
+                    />
+                    {ff.error && <p style={{ margin: 0, color: '#dc2626', fontSize: '12px' }}>{ff.error}</p>}
+                    <button
+                      type="button"
+                      onClick={() => handleSubmitFootage(notification)}
+                      disabled={ff.submitting}
+                      style={{ alignSelf: 'flex-start', padding: '9px 20px', border: 'none', borderRadius: '6px', background: colors.warning, color: '#fff', fontSize: '13px', fontWeight: 700, cursor: ff.submitting ? 'wait' : 'pointer' }}
+                    >
+                      {ff.submitting ? 'Submitting…' : 'Submit Response'}
+                    </button>
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
 
@@ -769,75 +1386,362 @@ function DriverDashboard() {
                 : trip.seats;
               const isFull = (trip.status || '').toLowerCase() === TRIP_STATUS.full || remainingSeats === 0;
               const isCancelling = busyTripId === trip.id;
+              const tripApproved = approvedByTripId[trip.id] || [];
+              const totalSeats = trip.seats ?? 0;
+              const seatsTaken = Math.max(0, totalSeats - (remainingSeats ?? 0));
 
               return (
                 <article
                   key={trip.id}
                   style={{
-                    padding: '16px',
-                    borderRadius: radius.lg,
+                    position: 'relative',
+                    padding: '0',
+                    borderRadius: radius.xl,
                     backgroundColor: colors.surfaceSolid,
                     border: `1px solid ${colors.border}`,
-                    boxShadow: shadows.soft,
+                    boxShadow: '0 8px 24px -12px rgba(15, 23, 42, 0.12), 0 2px 6px -2px rgba(15, 23, 42, 0.05)',
                     display: 'flex',
                     flexDirection: 'column',
-                    gap: '12px',
+                    overflow: 'hidden',
+                    transition: 'transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.transform = 'translateY(-3px)';
+                    e.currentTarget.style.boxShadow = '0 22px 48px -20px rgba(15, 118, 110, 0.35), 0 6px 18px -8px rgba(15, 23, 42, 0.12)';
+                    e.currentTarget.style.borderColor = 'rgba(15, 118, 110, 0.28)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.transform = '';
+                    e.currentTarget.style.boxShadow = '0 8px 24px -12px rgba(15, 23, 42, 0.12), 0 2px 6px -2px rgba(15, 23, 42, 0.05)';
+                    e.currentTarget.style.borderColor = colors.border;
                   }}
                 >
                   <div
                     style={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'flex-start',
-                      gap: '10px',
+                      height: '4px',
+                      background: isFull
+                        ? 'linear-gradient(90deg, #b45309 0%, #f59e0b 100%)'
+                        : colors.accentGradient,
                     }}
-                  >
-                    <div style={{ minWidth: 0 }}>
-                      <div
+                  />
+
+                  <div style={{ padding: '18px 20px 4px' }}>
+                    <div
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'flex-start',
+                        gap: '12px',
+                      }}
+                    >
+                      <div style={{ minWidth: 0, flex: 1 }}>
+                        <div
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '8px',
+                            minWidth: 0,
+                          }}
+                        >
+                          <span
+                            style={{
+                              fontSize: '1.05rem',
+                              fontWeight: 800,
+                              color: colors.text,
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              whiteSpace: 'nowrap',
+                              maxWidth: '40%',
+                            }}
+                          >
+                            {trip.origin || 'Unknown'}
+                          </span>
+                          <span
+                            aria-hidden="true"
+                            style={{
+                              color: colors.info,
+                              fontWeight: 800,
+                              fontSize: '1.1rem',
+                              flexShrink: 0,
+                            }}
+                          >
+                            →
+                          </span>
+                          <span
+                            style={{
+                              fontSize: '1.05rem',
+                              fontWeight: 800,
+                              color: colors.text,
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              whiteSpace: 'nowrap',
+                              maxWidth: '40%',
+                            }}
+                          >
+                            {trip.destination || 'Unknown'}
+                          </span>
+                        </div>
+                        <div
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            marginTop: '6px',
+                            fontSize: '0.82rem',
+                            color: colors.textSubtle,
+                            fontWeight: 600,
+                          }}
+                        >
+                          <span aria-hidden="true">🗓</span>
+                          <span>{formatTripDeparture(trip.departureTime)}</span>
+                        </div>
+                      </div>
+                      <span
                         style={{
-                          ...typography.h3,
-                          margin: 0,
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          whiteSpace: 'nowrap',
+                          flexShrink: 0,
+                          fontSize: '0.7rem',
+                          fontWeight: 800,
+                          letterSpacing: '0.08em',
+                          textTransform: 'uppercase',
+                          padding: '6px 10px',
+                          borderRadius: radius.pill,
+                          backgroundColor: isFull 
+                            ? 'rgba(180, 83, 9, 0.12)' 
+                            : trip.status === 'in_progress'
+                              ? 'rgba(16, 185, 129, 0.12)'
+                              : 'rgba(21, 128, 61, 0.12)',
+                          color: isFull 
+                            ? colors.warning 
+                            : trip.status === 'in_progress'
+                              ? '#10b981'
+                              : colors.success,
+                          border: `1px solid ${isFull 
+                            ? 'rgba(180, 83, 9, 0.25)' 
+                            : trip.status === 'in_progress'
+                              ? 'rgba(16, 185, 129, 0.25)'
+                              : 'rgba(21, 128, 61, 0.25)'}`,
                         }}
                       >
-                        {trip.origin || 'Unknown origin'} → {trip.destination || 'Unknown destination'}
-                      </div>
-                      <div style={{ ...typography.small, marginTop: '4px' }}>
-                        {formatTripDeparture(trip.departureTime)}
-                      </div>
+                        {isFull 
+                          ? 'Full' 
+                          : trip.status === 'in_progress'
+                            ? 'In Progress'
+                            : trip.status || TRIP_STATUS.active}
+                      </span>
                     </div>
-                    <span style={{ ...pills.base, ...(isFull ? pills.warning : pills.success), flexShrink: 0 }}>
-                      {isFull ? 'Full' : trip.status || TRIP_STATUS.active}
-                    </span>
                   </div>
 
                   <div
                     style={{
-                      display: 'grid',
-                      gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
-                      gap: '10px',
+                      display: 'flex',
+                      gap: '8px',
+                      padding: '12px 20px',
+                      flexWrap: 'wrap',
                     }}
                   >
-                    <InfoItem label="Seats left" value={remainingSeats ?? '—'} accent />
-                    <InfoItem label="Total seats" value={trip.seats ?? '—'} />
+                    <div
+                      style={{
+                        flex: '1 1 auto',
+                        minWidth: '120px',
+                        padding: '10px 12px',
+                        borderRadius: radius.md,
+                        background: 'linear-gradient(135deg, rgba(29, 78, 216, 0.06), rgba(15, 118, 110, 0.04))',
+                        border: `1px solid ${colors.border}`,
+                      }}
+                    >
+                      <div
+                        style={{
+                          fontSize: '0.66rem',
+                          fontWeight: 800,
+                          letterSpacing: '0.1em',
+                          textTransform: 'uppercase',
+                          color: colors.textSubtle,
+                          marginBottom: '2px',
+                        }}
+                      >
+                        Seats
+                      </div>
+                      <div style={{ fontSize: '1rem', fontWeight: 800, color: colors.text }}>
+                        {seatsTaken} <span style={{ color: colors.textSubtle, fontWeight: 600 }}>/ {totalSeats}</span>
+                      </div>
+                    </div>
+                    <div
+                      style={{
+                        flex: '1 1 auto',
+                        minWidth: '120px',
+                        padding: '10px 12px',
+                        borderRadius: radius.md,
+                        background: 'linear-gradient(135deg, rgba(15, 118, 110, 0.06), rgba(29, 78, 216, 0.04))',
+                        border: `1px solid ${colors.border}`,
+                      }}
+                    >
+                      <div
+                        style={{
+                          fontSize: '0.66rem',
+                          fontWeight: 800,
+                          letterSpacing: '0.1em',
+                          textTransform: 'uppercase',
+                          color: colors.textSubtle,
+                          marginBottom: '2px',
+                        }}
+                      >
+                        Approved
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        {tripApproved.length > 0 ? (
+                          <>
+                            <div style={{ display: 'flex', alignItems: 'center' }}>
+                              {tripApproved.slice(0, 3).map((request, idx) => {
+                                const profile = passengerProfiles[request.passengerId] || {};
+                                const name =
+                                  profile.displayName ||
+                                  request.passengerName ||
+                                  request.passengerEmail ||
+                                  'Passenger';
+                                return (
+                                  <div
+                                    key={request.id}
+                                    style={{
+                                      marginLeft: idx === 0 ? 0 : '-7px',
+                                      border: '2px solid #fff',
+                                      borderRadius: '50%',
+                                      display: 'inline-flex',
+                                      boxShadow: '0 1px 2px rgba(0,0,0,0.08)',
+                                    }}
+                                  >
+                                    <PassengerAvatar src={profile.avatarUrl} name={name} size={24} />
+                                  </div>
+                                );
+                              })}
+                            </div>
+                            <span style={{ fontSize: '1rem', fontWeight: 800, color: colors.text }}>
+                              {tripApproved.length}
+                            </span>
+                          </>
+                        ) : (
+                          <span style={{ fontSize: '0.9rem', fontWeight: 700, color: colors.textSubtle }}>
+                            None yet
+                          </span>
+                        )}
+                      </div>
+                    </div>
                   </div>
 
-                  <button
-                    type="button"
-                    onClick={() => setTripToCancel(trip)}
-                    disabled={isCancelling}
+                  <div
                     style={{
-                      ...buttons.ghost,
-                      color: colors.danger,
-                      borderColor: 'rgba(220, 38, 38, 0.25)',
-                      opacity: isCancelling ? 0.7 : 1,
-                      cursor: isCancelling ? 'wait' : 'pointer',
+                      display: 'flex',
+                      gap: '8px',
+                      padding: '4px 20px 18px',
+                      alignItems: 'center',
                     }}
                   >
-                    {isCancelling ? 'Cancelling...' : 'Cancel Trip'}
-                  </button>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', width: '100%' }}>
+                      <div style={{ display: 'flex', gap: '8px', width: '100%' }}>
+                        <button
+                          type="button"
+                          onClick={() => onOpenLiveTrip?.(trip.id === 'demo-trip-1' ? 'demo' : trip.id)}
+                          style={{
+                            flex: 1,
+                            border: 'none',
+                            borderRadius: radius.pill,
+                            padding: '12px 18px',
+                            fontSize: '0.9rem',
+                            fontWeight: 800,
+                            cursor: 'pointer',
+                            background: trip.status === 'in_progress' ? '#10b981' : colors.accentGradient,
+                            color: '#fff',
+                            boxShadow: trip.status === 'in_progress' 
+                              ? '0 8px 20px -6px rgba(16, 185, 129, 0.4)' 
+                              : '0 8px 20px -6px rgba(15, 118, 110, 0.4)',
+                            transition: 'transform 0.15s ease, box-shadow 0.15s ease',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: '8px',
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.transform = 'translateY(-1px)';
+                            e.currentTarget.style.boxShadow = trip.status === 'in_progress' 
+                              ? '0 12px 28px -6px rgba(16, 185, 129, 0.5)' 
+                              : '0 12px 28px -6px rgba(15, 118, 110, 0.5)';
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.transform = '';
+                            e.currentTarget.style.boxShadow = trip.status === 'in_progress' 
+                              ? '0 8px 20px -6px rgba(16, 185, 129, 0.4)' 
+                              : '0 8px 20px -6px rgba(15, 118, 110, 0.4)';
+                          }}
+                        >
+                          <span>{trip.status === 'in_progress' ? '⚡ Active: Manage Live Trip' : 'Start / Manage Live Trip'}</span>
+                        </button>
+                      </div>
+                      <div style={{ display: 'flex', gap: '8px', width: '100%', alignItems: 'center' }}>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedTripId(trip.id)}
+                          style={{
+                            flex: 1,
+                            border: `1px solid ${colors.borderStrong}`,
+                            borderRadius: radius.pill,
+                            padding: '10px 18px',
+                            fontSize: '0.86rem',
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                            background: '#fff',
+                            color: colors.text,
+                            transition: 'transform 0.15s ease, background-color 0.15s ease',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: '6px',
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.transform = 'translateY(-1px)';
+                            e.currentTarget.style.backgroundColor = colors.surfaceMuted;
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.transform = '';
+                            e.currentTarget.style.backgroundColor = '#fff';
+                          }}
+                        >
+                          <span>View passengers</span>
+                          <span aria-hidden="true">→</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setTripToCancel(trip)}
+                          disabled={isCancelling}
+                          title="Cancel trip"
+                          aria-label="Cancel trip"
+                          style={{
+                            flexShrink: 0,
+                            width: '38px',
+                            height: '38px',
+                            borderRadius: '50%',
+                            border: '1px solid rgba(220, 38, 38, 0.25)',
+                            backgroundColor: '#fff',
+                            color: colors.danger,
+                            cursor: isCancelling ? 'wait' : 'pointer',
+                            opacity: isCancelling ? 0.6 : 1,
+                            fontSize: '15px',
+                            fontWeight: 700,
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            transition: 'background-color 0.15s ease',
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.backgroundColor = 'rgba(220, 38, 38, 0.08)';
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.backgroundColor = '#fff';
+                          }}
+                        >
+                          {isCancelling ? '…' : '✕'}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
                 </article>
               );
             })}
@@ -1015,15 +1919,118 @@ function DriverDashboard() {
           border: `1px solid ${colors.border}`,
         }}
       >
-        <div style={{ ...typography.eyebrow, color: colors.info, marginBottom: '4px' }}>
+        <div style={{ ...typography.eyebrow, color: colors.info, marginBottom: '8px' }}>
           Approved riders
         </div>
-        <div style={{ ...typography.body, margin: 0 }}>
-          {approvedRequests.length === 0
-            ? 'Approved passengers will appear here once you accept them.'
-            : `${approvedRequests.length} passenger(s) confirmed across your trips.`}
-        </div>
+        {approvedRequests.length === 0 ? (
+          <div style={{ ...typography.body, margin: 0 }}>
+            Approved passengers will appear here once you accept them.
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            {approvedRequests.map((request) => {
+              const trip = tripsById[request.tripId];
+              const profile = passengerProfiles[request.passengerId] || {};
+              const displayName =
+                profile.displayName ||
+                request.passengerName ||
+                request.passengerEmail ||
+                'Passenger';
+              const alreadyReported = reportedPassengerIds.includes(request.passengerId);
+              return (
+                <div
+                  key={request.id}
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    padding: '10px 12px',
+                    borderRadius: radius.md,
+                    backgroundColor: colors.surfaceSolid,
+                    border: `1px solid ${colors.border}`,
+                    gap: '12px',
+                    flexWrap: 'wrap',
+                  }}
+                >
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ ...typography.h3, margin: 0, fontSize: '0.9rem' }}>
+                      {displayName}
+                    </div>
+                    <div style={{ color: colors.textSubtle, fontSize: '0.8rem', marginTop: '2px' }}>
+                      {trip?.origin || '?'} → {trip?.destination || '?'}
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                    {canViewChat(request.status) && (
+                      <button
+                        type="button"
+                        onClick={() => setChatModalRide(request)}
+                        style={{
+                          padding: '6px 14px',
+                          borderRadius: '8px',
+                          border: '1px solid #0ea5e9',
+                          backgroundColor: '#0ea5e9',
+                          color: '#fff',
+                          cursor: 'pointer',
+                          fontWeight: 600,
+                          fontSize: '0.82rem',
+                          flexShrink: 0,
+                        }}
+                      >
+                        Chat
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                    disabled={alreadyReported}
+                    onClick={() =>
+                      setReportTarget({
+                        userId: request.passengerId,
+                        userName: displayName,
+                        tripId: request.tripId,
+                      })
+                    }
+                    style={{
+                      padding: '6px 14px',
+                      borderRadius: '8px',
+                      border: '1px solid rgba(220, 38, 38, 0.35)',
+                      backgroundColor: alreadyReported ? '#f3f4f6' : '#fff',
+                      color: alreadyReported ? '#9ca3af' : '#dc2626',
+                      cursor: alreadyReported ? 'not-allowed' : 'pointer',
+                      fontWeight: 600,
+                      fontSize: '0.82rem',
+                      flexShrink: 0,
+                    }}
+                  >
+                    {alreadyReported ? 'Reported' : 'Report'}
+                  </button>
+                </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
+
+      {selectedTripId && tripsById[selectedTripId] && (
+        <TripPassengersModal
+          trip={tripsById[selectedTripId]}
+          approvedRequests={approvedByTripId[selectedTripId] || []}
+          passengerProfiles={passengerProfiles}
+          onClose={() => setSelectedTripId(null)}
+        />
+      )}
+
+      {reportTarget && (
+        <ReportUserModal
+          reportedUserId={reportTarget.userId}
+          reportedUserName={reportTarget.userName}
+          reporterId={auth.currentUser?.uid}
+          tripId={reportTarget.tripId}
+          onClose={() => setReportTarget(null)}
+          onReported={() => setReportedPassengerIds((prev) => [...prev, reportTarget.userId])}
+        />
+      )}
 
       {tripToCancel && (
         <div
