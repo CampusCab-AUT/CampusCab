@@ -13,10 +13,12 @@ import {
   writeBatch,
 } from 'firebase/firestore';
 import { auth, db, firebaseReady } from '../firebase';
-import { FIRESTORE_COLLECTIONS, NOTIFICATION_STATUS, RIDE_REQUEST_STATUS } from '../firestoreModel';
+import { FIRESTORE_COLLECTIONS, NOTIFICATION_STATUS, RIDE_REQUEST_STATUS, ROUTE_ALERT_STATUS } from '../firestoreModel';
 import { registerBrowserPushToken } from '../utils/pushNotifications';
+import { colors, radius } from '../theme';
 import SearchTrips from './SearchTrips';
 import TripDetails from './TripDetails';
+import MyAlerts from './MyAlerts';
 import LeaveRatingModal from '../components/LeaveRatingModal';
 import ReportUserModal from '../components/ReportUserModal';
 import ChatWindow from '../components/ChatWindow';
@@ -51,6 +53,24 @@ function PassengerDashboard() {
   const [reportedRideIds, setReportedRideIds] = useState([]);
   const [footageFormState, setFootageFormState] = useState({});
   const [chatModalRide, setChatModalRide] = useState(null);
+  const [view, setView] = useState('rides'); // 'rides' | 'alerts'
+  const [activeAlertCount, setActiveAlertCount] = useState(0);
+
+  useEffect(() => {
+    if (!firebaseReady || !auth?.currentUser || !db) return undefined;
+    const q = query(
+      collection(db, FIRESTORE_COLLECTIONS.routeAlerts),
+      where('passengerId', '==', auth.currentUser.uid),
+    );
+    const unsub = onSnapshot(q, (snap) => {
+      let active = 0;
+      snap.forEach((d) => {
+        if ((d.data().status || ROUTE_ALERT_STATUS.active) === ROUTE_ALERT_STATUS.active) active += 1;
+      });
+      setActiveAlertCount(active);
+    });
+    return () => unsub();
+  }, []);
 
   useEffect(() => {
     if (!firebaseReady || !auth || !db) {
@@ -376,11 +396,95 @@ function PassengerDashboard() {
     return false;
   });
 
+  const passengerTabs = [
+    { id: 'rides', label: 'Rides', icon: '🎒' },
+    { id: 'alerts', label: 'My Alerts', icon: '🔔', badge: activeAlertCount },
+  ];
+  const tabStrip = (
+    <div
+      role="tablist"
+      aria-label="Passenger views"
+      style={{
+        display: 'inline-flex',
+        gap: 4,
+        padding: 4,
+        borderRadius: radius.pill,
+        background: colors.surfaceMuted,
+        border: `1px solid ${colors.border}`,
+        marginBottom: 24,
+      }}
+    >
+      {passengerTabs.map((tab) => {
+        const isActive = view === tab.id;
+        return (
+          <button
+            key={tab.id}
+            type="button"
+            role="tab"
+            aria-selected={isActive}
+            onClick={() => setView(tab.id)}
+            style={{
+              border: 'none',
+              borderRadius: radius.pill,
+              padding: '8px 16px',
+              fontSize: '0.86rem',
+              fontWeight: 800,
+              cursor: 'pointer',
+              background: isActive ? colors.accentGradient : 'transparent',
+              color: isActive ? '#fff' : colors.text,
+              boxShadow: isActive ? '0 8px 18px -8px rgba(15, 118, 110, 0.45)' : 'none',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              transition: 'background 0.15s ease, color 0.15s ease',
+            }}
+          >
+            <span aria-hidden="true">{tab.icon}</span>
+            {tab.label}
+            {typeof tab.badge === 'number' && tab.badge > 0 && (
+              <span
+                style={{
+                  display: 'inline-flex',
+                  minWidth: 18,
+                  height: 18,
+                  padding: '0 6px',
+                  borderRadius: 999,
+                  fontSize: '0.7rem',
+                  fontWeight: 800,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  background: isActive ? 'rgba(255,255,255,0.25)' : colors.accent,
+                  color: '#fff',
+                }}
+              >
+                {tab.badge}
+              </span>
+            )}
+          </button>
+        );
+      })}
+    </div>
+  );
+
+  if (view === 'alerts') {
+    return (
+      <div style={{ maxWidth: 1200, margin: '0 auto', padding: 20 }}>
+        <header style={{ borderBottom: '1px solid #eee', paddingBottom: 20, marginBottom: 30 }}>
+          <h1>Passenger Dashboard</h1>
+          <p>Manage the routes you want to be pinged about.</p>
+          {tabStrip}
+        </header>
+        <MyAlerts onGoToSearch={() => setView('rides')} />
+      </div>
+    );
+  }
+
   return (
     <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '20px' }}>
       <header style={{ borderBottom: '1px solid #eee', paddingBottom: '20px', marginBottom: '30px' }}>
         <h1>Passenger Dashboard</h1>
         <p>Welcome back! Manage your upcoming rides or find a new trip to campus.</p>
+        {tabStrip}
       </header>
 
       {notifications.length > 0 && (
