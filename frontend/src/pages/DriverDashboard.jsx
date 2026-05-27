@@ -2032,6 +2032,14 @@ function DriverDashboard({ onOpenLiveTrip }) {
         />
       )}
 
+      {chatModalRide && (
+        <ChatWindow
+          rideRequest={chatModalRide}
+          currentUser={auth.currentUser}
+          onClose={() => setChatModalRide(null)}
+        />
+      )}
+
       {tripToCancel && (
         <div
           role="presentation"
