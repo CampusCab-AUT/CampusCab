@@ -24,6 +24,58 @@ const NOTIFICATION_STATUS = {
   unread: 'unread',
 };
 
+const ROUTE_ALERT_STATUS = {
+  active: 'active',
+  paused: 'paused',
+  fulfilled: 'fulfilled',
+};
+
+function haversineKm(a, b) {
+  if (!a || !b) return Infinity;
+  const R = 6371;
+  const toRad = (n) => (n * Math.PI) / 180;
+  const dLat = toRad(b.lat - a.lat);
+  const dLon = toRad(b.lon - a.lon);
+  const lat1 = toRad(a.lat);
+  const lat2 = toRad(b.lat);
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+
+function tripMatchesAlert(trip, alert) {
+  if (!trip || !alert) return false;
+  if ((alert.status || ROUTE_ALERT_STATUS.active) !== ROUTE_ALERT_STATUS.active) return false;
+  if (!trip.destination || trip.destination !== alert.destination) return false;
+  if (trip.womenOnly && !alert.womenOnlyOk) return false;
+
+  const depRaw = trip.departureTime;
+  if (!depRaw) return false;
+  const depDate = new Date(depRaw);
+  if (Number.isNaN(depDate.getTime())) return false;
+
+  const depYmd = typeof depRaw === 'string' && depRaw.length >= 10
+    ? depRaw.slice(0, 10)
+    : depDate.toISOString().slice(0, 10);
+
+  if (alert.startDate && depYmd < alert.startDate) return false;
+  if (alert.endDate && depYmd > alert.endDate) return false;
+
+  if (alert.earliestTime && depYmd === alert.startDate) {
+    const depHm = typeof depRaw === 'string' && depRaw.length >= 16 ? depRaw.slice(11, 16) : null;
+    if (depHm && depHm < alert.earliestTime) return false;
+  }
+
+  if (alert.originLocation && trip.originLocation) {
+    const km = haversineKm(alert.originLocation, trip.originLocation);
+    const radius = typeof alert.pickupRadiusKm === 'number' ? alert.pickupRadiusKm : 10;
+    if (km > radius) return false;
+  }
+
+  return true;
+}
+
 const getSmtpTransporter = () =>
   nodemailer.createTransport({
     host: process.env.SMTP_HOST || 'smtp.gmail.com',
@@ -416,3 +468,140 @@ exports.onUserSuspended = functions.firestore
 
     return null;
   });
+
+/**
+ * When a driver publishes a new active trip, fan out push notifications and
+ * Firestore notification docs to every passenger whose active route alert
+ * matches the trip (same destination, within the alert's date window, time
+ * floor, women-only respect, and pickup proximity).
+ *
+ * The function queries routeAlerts by destination + status (cheap equality
+ * filters) and runs the finer match logic in-memory so we don't need
+ * composite indexes per alert field.
+ */
+exports.onTripCreated = functions.firestore
+  .document('trips/{tripId}')
+  .onCreate(async (snap, context) => {
+    const tripData = snap.data();
+    if (!tripData) return null;
+    const tripId = context.params.tripId;
+    const tripStatus = (tripData.status || '').toLowerCase();
+    if (tripStatus && tripStatus !== TRIP_STATUS.active) {
+      functions.logger.info('Trip created with non-active status; skipping route alert fanout.', {
+        tripId,
+        tripStatus,
+      });
+      return null;
+    }
+    if (!tripData.destination) {
+      functions.logger.warn('Trip has no destination; skipping route alert fanout.', { tripId });
+      return null;
+    }
+
+    const alertsSnap = await db
+      .collection('routeAlerts')
+      .where('destination', '==', tripData.destination)
+      .where('status', '==', ROUTE_ALERT_STATUS.active)
+      .get();
+
+    if (alertsSnap.empty) {
+      functions.logger.info('No active route alerts for trip destination.', {
+        tripId,
+        destination: tripData.destination,
+      });
+      return null;
+    }
+
+    const matches = alertsSnap.docs
+      .map((d) => ({ id: d.id, ref: d.ref, ...d.data() }))
+      .filter((alert) => tripMatchesAlert(tripData, alert))
+      // Drivers don't push notifications to themselves.
+      .filter((alert) => alert.passengerId !== tripData.driverId);
+
+    if (matches.length === 0) {
+      functions.logger.info('Trip matched zero active route alerts after in-memory filter.', {
+        tripId,
+        candidates: alertsSnap.size,
+      });
+      return null;
+    }
+
+    const origin = tripData.origin || 'a nearby pickup';
+    const destShort = (tripData.destination || 'campus').split(',')[0];
+    const message = `New ride matches your alert: ${origin} → ${destShort}.`;
+
+    const batch = db.batch();
+    matches.forEach((alert) => {
+      batch.set(db.collection('notifications').doc(), {
+        type: 'route_alert_match',
+        recipientId: alert.passengerId,
+        tripId,
+        alertId: alert.id,
+        driverId: tripData.driverId || '',
+        status: NOTIFICATION_STATUS.unread,
+        message,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+      batch.update(alert.ref, {
+        notificationsSent: admin.firestore.FieldValue.increment(1),
+        lastMatchedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    });
+    await batch.commit();
+
+    // Fan out push notifications.
+    const tokenDocsByPassenger = await Promise.all(
+      matches.map(async (alert) => {
+        const tokensSnapshot = await db
+          .collection('pushTokens')
+          .where('userId', '==', alert.passengerId)
+          .where('role', '==', 'passenger')
+          .get();
+        return tokensSnapshot.docs.map((tokenDoc) => ({
+          ref: tokenDoc.ref,
+          token: tokenDoc.data().token,
+          passengerId: alert.passengerId,
+        }));
+      }),
+    );
+    const tokenDocs = tokenDocsByPassenger.flat().filter((t) => Boolean(t.token));
+    const tokens = tokenDocs.map((t) => t.token);
+
+    if (tokens.length === 0) {
+      functions.logger.info('Route alert match: no push tokens registered for matched passengers.', {
+        tripId,
+        matchedCount: matches.length,
+      });
+      return null;
+    }
+
+    const response = await admin.messaging().sendEachForMulticast({
+      tokens,
+      notification: {
+        title: '🔔 Route match!',
+        body: message,
+      },
+      data: {
+        type: 'route_alert_match',
+        tripId,
+        url: '/',
+        body: message,
+      },
+      webpush: {
+        fcmOptions: { link: '/' },
+      },
+    });
+
+    functions.logger.info('Route alert push notifications sent.', {
+      tripId,
+      matchedCount: matches.length,
+      successCount: response.successCount,
+      failureCount: response.failureCount,
+    });
+
+    await deleteStaleTokens(response, tokenDocs, { tripId });
+    return null;
+  });
+
+// Exported for unit testing the matching helper.
+exports._internal = { tripMatchesAlert, haversineKm };
