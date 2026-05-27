@@ -183,7 +183,7 @@ function ChangeView({ center, zoom, bounds }) {
   return null;
 }
 
-export function RouteMap({ origin, destination, setRouteGeoJson }) {
+export function RouteMap({ origin, destination, setRouteGeoJson, height = '300px', style = {} }) {
   const [routeCoords, setRouteCoords] = useState([]);
   
   useEffect(() => {
@@ -216,7 +216,7 @@ export function RouteMap({ origin, destination, setRouteGeoJson }) {
   }
 
   return (
-    <div style={{ height: '300px', width: '100%', borderRadius: radius.md, overflow: 'hidden', border: `1px solid ${colors.border}`, position: 'relative', zIndex: 0 }}>
+    <div style={{ height: height, width: '100%', borderRadius: radius.md, overflow: 'hidden', border: `1px solid ${colors.border}`, position: 'relative', zIndex: 0, ...style }}>
       <MapContainer center={mapCenter} zoom={12} style={{ height: '100%', width: '100%', zIndex: 0 }}>
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'

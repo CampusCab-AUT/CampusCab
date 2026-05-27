@@ -44,6 +44,7 @@ function PassengerDashboard() {
   const [pushStatus, setPushStatus] = useState('idle');
   const [pushMessage, setPushMessage] = useState('');
   const [viewingTrip, setViewingTrip] = useState(null);
+  const [searchedPassengerLocation, setSearchedPassengerLocation] = useState(null);
   
   const [ratingModalRide, setRatingModalRide] = useState(null);
   const [ratedRideIds, setRatedRideIds] = useState([]);
@@ -510,14 +511,23 @@ function PassengerDashboard() {
       {viewingTrip ? (
         <TripDetails 
           trip={viewingTrip} 
-          onBack={() => setViewingTrip(null)} 
+          passengerLocation={searchedPassengerLocation}
+          onBack={() => {
+            setViewingTrip(null);
+            setSearchedPassengerLocation(null);
+          }} 
         />
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '40px' }}>
           {/* Left Column: Search & Action Area */}
           <section>
             <div style={{ backgroundColor: '#f9f9f9', padding: '20px', borderRadius: '8px' }}>
-              <SearchTrips onTripSelect={setViewingTrip} />
+              <SearchTrips 
+                onTripSelect={(trip, location) => {
+                  setViewingTrip(trip);
+                  setSearchedPassengerLocation(location);
+                }} 
+              />
             </div>
           </section>
 

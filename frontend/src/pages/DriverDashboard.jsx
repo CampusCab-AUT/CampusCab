@@ -463,6 +463,16 @@ function TripPassengersModal({ trip, approvedRequests, passengerProfiles, onClos
                           {request.passengerEmail}
                         </div>
                       ) : null}
+                      <div
+                        style={{
+                          margin: '4px 0 0',
+                          fontSize: '0.82rem',
+                          fontWeight: 600,
+                          color: colors.accent,
+                        }}
+                      >
+                        📍 Pickup: {request.passengerAddress || 'No address specified'}
+                      </div>
                     </div>
                     {request.seatsRequested ? (
                       <span
@@ -578,6 +588,7 @@ function DriverDashboard({ onOpenLiveTrip }) {
           passengerEmail: 'jamie.chen@autuni.ac.nz',
           note: 'I can meet near the main gate.',
           status: RIDE_REQUEST_STATUS.pending,
+          passengerAddress: '12 Wellesley St E, Auckland CBD',
         },
         {
           id: 'demo-request-2',
@@ -586,6 +597,7 @@ function DriverDashboard({ onOpenLiveTrip }) {
           passengerEmail: 'taylor.singh@autuni.ac.nz',
           note: 'Happy to chip in for parking.',
           status: RIDE_REQUEST_STATUS.approved,
+          passengerAddress: '90 Akoranga Dr, Northcote',
         },
       ]);
       setNotifications([
@@ -1869,6 +1881,12 @@ function DriverDashboard({ onOpenLiveTrip }) {
                   />
                   <InfoItem label="Seats left" value={remainingSeats ?? '—'} accent />
                   <InfoItem label="Requested" value={request.seatsRequested || 1} />
+                  <InfoItem 
+                    label="Pickup Address" 
+                    value="🔒 Private (Hidden until accepted)" 
+                    accent 
+                    wide
+                  />
                   {request.note && <InfoItem label="Note" value={request.note} wide />}
                 </div>
 
@@ -1958,6 +1976,9 @@ function DriverDashboard({ onOpenLiveTrip }) {
                     </div>
                     <div style={{ color: colors.textSubtle, fontSize: '0.8rem', marginTop: '2px' }}>
                       {trip?.origin || '?'} → {trip?.destination || '?'}
+                    </div>
+                    <div style={{ color: colors.accent, fontSize: '0.82rem', fontWeight: 700, marginTop: '4px' }}>
+                      📍 Pickup: {request.passengerAddress || 'No address specified'}
                     </div>
                   </div>
                   <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>

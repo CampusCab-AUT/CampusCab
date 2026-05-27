@@ -149,7 +149,7 @@ export default function DriverTripView({ tripId, onBackToDashboard }) {
         avatarInitials: p.passengerName.split(' ').map(n => n[0]).join('').toUpperCase() || 'P',
         rating: p.passengerRating,
         role: p.passengerRole,
-        pickup: pickupLoc,
+        pickup: p.passengerAddress || pickupLoc,
         dropoff: dropoffLoc,
         seats: totalSeats,
         fareShare: 'Free',
