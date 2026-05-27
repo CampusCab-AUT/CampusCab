@@ -331,7 +331,7 @@ const SearchTrips = ({ onTripSelect }) => {
                   <div 
                     key={trip.id} 
                     onClick={() => {
-                      if (onTripSelect) onTripSelect(trip);
+                      if (onTripSelect) onTripSelect(trip, passengerLocation);
                     }}
                     style={{ 
                       ...surfaces.innerCard,

@@ -47,6 +47,7 @@ function formatDeparture(departureTime) {
  */
 function PassengerDashboard() {
   const [upcomingRides, setUpcomingRides] = useState([]);
+  const [associatedTrips, setAssociatedTrips] = useState({});
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState('');
@@ -55,6 +56,7 @@ function PassengerDashboard() {
   const [pushStatus, setPushStatus] = useState('idle');
   const [pushMessage, setPushMessage] = useState('');
   const [viewingTrip, setViewingTrip] = useState(null);
+  const [searchedPassengerLocation, setSearchedPassengerLocation] = useState(null);
   
   const [ratingModalRide, setRatingModalRide] = useState(null);
   const [ratedRideIds, setRatedRideIds] = useState([]);
@@ -160,6 +162,28 @@ function PassengerDashboard() {
       },
     );
   }, []);
+
+  useEffect(() => {
+    if (!firebaseReady || !db || upcomingRides.length === 0) {
+      return undefined;
+    }
+
+    const tripIds = [...new Set(upcomingRides.map((r) => r.tripId).filter(Boolean))];
+    const unsubscribes = tripIds.map((tId) => {
+      return onSnapshot(doc(db, FIRESTORE_COLLECTIONS.trips, tId), (docSnap) => {
+        if (docSnap.exists()) {
+          setAssociatedTrips((prev) => ({
+            ...prev,
+            [tId]: { id: docSnap.id, ...docSnap.data() },
+          }));
+        }
+      });
+    });
+
+    return () => {
+      unsubscribes.forEach((unsub) => unsub());
+    };
+  }, [upcomingRides]);
 
   useEffect(() => {
     if (!firebaseReady || !auth || !db || !auth.currentUser) {
@@ -437,7 +461,15 @@ function PassengerDashboard() {
    */
   const now = new Date();
   
-  const actualUpcomingRides = upcomingRides.filter(ride => {
+  const ridesWithRealtimeTrips = upcomingRides.map(ride => {
+    const realtimeTrip = ride.tripId ? associatedTrips[ride.tripId] : null;
+    return {
+      ...ride,
+      trip: realtimeTrip || ride.trip
+    };
+  });
+
+  const actualUpcomingRides = ridesWithRealtimeTrips.filter(ride => {
     if (ride.status === RIDE_REQUEST_STATUS.pending) return true;
     if (ride.status === RIDE_REQUEST_STATUS.approved) {
       const tripStatus = ride.trip?.status;
@@ -451,7 +483,7 @@ function PassengerDashboard() {
     return false;
   });
 
-  const actualPastRides = upcomingRides.filter(ride => {
+  const actualPastRides = ridesWithRealtimeTrips.filter(ride => {
     if (ride.status === RIDE_REQUEST_STATUS.approved) {
       const tripStatus = ride.trip?.status;
       if (tripStatus === 'completed') return true;
@@ -718,14 +750,23 @@ function PassengerDashboard() {
       {viewingTrip ? (
         <TripDetails 
           trip={viewingTrip} 
-          onBack={() => setViewingTrip(null)} 
+          passengerLocation={searchedPassengerLocation}
+          onBack={() => {
+            setViewingTrip(null);
+            setSearchedPassengerLocation(null);
+          }} 
         />
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '40px' }}>
           {/* Left Column: Search & Action Area */}
           <section>
             <div style={{ backgroundColor: '#f9f9f9', padding: '20px', borderRadius: '8px' }}>
-              <SearchTrips onTripSelect={setViewingTrip} />
+              <SearchTrips 
+                onTripSelect={(trip, location) => {
+                  setViewingTrip(trip);
+                  setSearchedPassengerLocation(location);
+                }} 
+              />
             </div>
           </section>
 

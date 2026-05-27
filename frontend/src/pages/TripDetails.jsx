@@ -14,13 +14,14 @@ function formatDeparture(departureTime) {
   });
 }
 
-function TripDetails({ trip, onBack }) {
+function TripDetails({ trip, passengerLocation, onBack }) {
   const [driver, setDriver] = useState(null);
   const [vehicle, setVehicle] = useState(null);
   const [loading, setLoading] = useState(true);
   const [bookingLoading, setBookingLoading] = useState(false);
   const [error, setError] = useState('');
   const [seatsToBook, setSeatsToBook] = useState(1);
+  const [passengerAddress, setPassengerAddress] = useState(passengerLocation?.name || '');
 
   useEffect(() => {
     if (!firebaseReady || !db) {
@@ -86,6 +87,9 @@ function TripDetails({ trip, onBack }) {
         createdAt: serverTimestamp(),
         note: `Requested ${seatsToBook} seat(s)`,
         seatsRequested: seatsToBook,
+        passengerAddress: passengerAddress.trim() || 'No address specified',
+        passengerLatitude: passengerLocation?.lat || null,
+        passengerLongitude: passengerLocation?.lon || null,
       });
       
       batch.set(notificationRef, {
@@ -196,32 +200,49 @@ function TripDetails({ trip, onBack }) {
         </div>
 
         {/* Booking Section */}
-        <div style={{ borderTop: `1px solid ${colors.border}`, paddingTop: spacing.xl, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: spacing.md }}>
-          <div>
-            <div style={{ ...typography.h3, marginBottom: '4px' }}>Ready to book?</div>
-            <div style={{ color: colors.textSubtle }}>{trip.availableSeats} seat(s) left</div>
+        <div style={{ borderTop: `1px solid ${colors.border}`, paddingTop: spacing.xl, display: 'flex', flexDirection: 'column', gap: spacing.md }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', width: '100%', maxWidth: '400px' }}>
+            <label htmlFor="passengerAddress" style={{ ...inputs.label, marginBottom: 0, fontWeight: 700 }}>
+              Specific Pickup Address (Private — only shared after driver accepts)
+            </label>
+            <input
+              id="passengerAddress"
+              type="text"
+              placeholder="e.g. 123 Main St"
+              value={passengerAddress}
+              onChange={(e) => setPassengerAddress(e.target.value)}
+              style={{ ...inputs.field, width: '100%', padding: '10px' }}
+              required
+            />
           </div>
-          
-          <div style={{ display: 'flex', alignItems: 'center', gap: spacing.md }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <label htmlFor="seats" style={{ ...inputs.label, marginBottom: 0 }}>Seats</label>
-              <input
-                id="seats"
-                type="number"
-                min="1"
-                max={trip.availableSeats}
-                value={seatsToBook}
-                onChange={(e) => setSeatsToBook(Number(e.target.value))}
-                style={{ ...inputs.field, width: '70px', padding: '8px', textAlign: 'center' }}
-              />
+
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: spacing.md, width: '100%' }}>
+            <div>
+              <div style={{ ...typography.h3, marginBottom: '4px' }}>Ready to book?</div>
+              <div style={{ color: colors.textSubtle }}>{trip.availableSeats} seat(s) left</div>
             </div>
-            <button 
-              onClick={handleBookTrip}
-              disabled={bookingLoading}
-              style={{ ...buttons.primary, opacity: bookingLoading ? 0.7 : 1 }}
-            >
-              {bookingLoading ? 'Requesting...' : 'Request to Book'}
-            </button>
+            
+            <div style={{ display: 'flex', alignItems: 'center', gap: spacing.md }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <label htmlFor="seats" style={{ ...inputs.label, marginBottom: 0 }}>Seats</label>
+                <input
+                  id="seats"
+                  type="number"
+                  min="1"
+                  max={trip.availableSeats}
+                  value={seatsToBook}
+                  onChange={(e) => setSeatsToBook(Number(e.target.value))}
+                  style={{ ...inputs.field, width: '70px', padding: '8px', textAlign: 'center' }}
+                />
+              </div>
+              <button 
+                onClick={handleBookTrip}
+                disabled={bookingLoading || !passengerAddress.trim()}
+                style={{ ...buttons.primary, opacity: (bookingLoading || !passengerAddress.trim()) ? 0.7 : 1 }}
+              >
+                {bookingLoading ? 'Requesting...' : 'Request to Book'}
+              </button>
+            </div>
           </div>
         </div>
       </div>
