@@ -87,6 +87,8 @@ function TripDetails({ trip, passengerLocation, onBack }) {
         note: `Requested ${seatsToBook} seat(s)`,
         seatsRequested: seatsToBook,
         passengerAddress: passengerAddress.trim() || 'No address specified',
+        passengerLatitude: passengerLocation?.lat || null,
+        passengerLongitude: passengerLocation?.lon || null,
       });
       
       batch.set(notificationRef, {

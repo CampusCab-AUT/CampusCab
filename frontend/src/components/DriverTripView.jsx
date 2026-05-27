@@ -2,11 +2,41 @@ import React, { useState, useEffect } from 'react';
 import { doc, onSnapshot, updateDoc, collection, query, where, getDoc } from 'firebase/firestore';
 import { db, firebaseReady } from '../firebase';
 import { FIRESTORE_COLLECTIONS, TRIP_STATUS, RIDE_REQUEST_STATUS } from '../firestoreModel';
+import { RouteMap } from './MapComponents';
 
 export default function DriverTripView({ tripId, onBackToDashboard }) {
   const [tripState, setTripState] = useState('not_started'); // 'not_started' | 'in_progress' | 'completed'
   const [tripData, setTripData] = useState(null);
   const [approvedPassengers, setApprovedPassengers] = useState([]);
+  const [driverLocation, setDriverLocation] = useState(null);
+
+  // Geolocation tracking
+  useEffect(() => {
+    if (!navigator.geolocation) return;
+
+    const handleSuccess = (position) => {
+      setDriverLocation({
+        lat: position.coords.latitude,
+        lon: position.coords.longitude,
+      });
+    };
+
+    const handleError = (error) => {
+      console.error('Error getting driver geolocation:', error);
+    };
+
+    // Get initial position
+    navigator.geolocation.getCurrentPosition(handleSuccess, handleError);
+
+    // Watch position
+    const watchId = navigator.geolocation.watchPosition(handleSuccess, handleError, {
+      enableHighAccuracy: true,
+      timeout: 15000,
+      maximumAge: 5000,
+    });
+
+    return () => navigator.geolocation.clearWatch(watchId);
+  }, []);
 
   const isDemo = !firebaseReady || !tripId || tripId === 'demo';
 
@@ -185,6 +215,34 @@ export default function DriverTripView({ tripId, onBackToDashboard }) {
     };
   }
 
+  const cityCampus = { lat: -36.8532, lon: 174.7666 };
+  const northCampus = { lat: -36.8016, lon: 174.7497 };
+
+  const originLoc = isDemo 
+    ? cityCampus 
+    : (tripData?.originLocation || cityCampus);
+
+  const destLoc = isDemo 
+    ? northCampus 
+    : (tripData?.destinationLocation || northCampus);
+
+  // Determine actual route coordinates dynamically
+  let routeOrigin = driverLocation || originLoc;
+  let routeDestination = destLoc;
+
+  if (tripState === 'not_started') {
+    let pickupCoords = null;
+    if (!isDemo && approvedPassengers.length > 0) {
+      const pWithCoords = approvedPassengers.find(p => p.passengerLatitude && p.passengerLongitude);
+      if (pWithCoords) {
+        pickupCoords = { lat: pWithCoords.passengerLatitude, lon: pWithCoords.passengerLongitude };
+      }
+    }
+    routeDestination = pickupCoords || originLoc;
+  } else {
+    routeDestination = destLoc;
+  }
+
   return (
     <div className="relative w-full max-w-md mx-auto h-[844px] bg-slate-950 text-white rounded-[40px] shadow-2xl overflow-hidden border-8 border-slate-900 flex flex-col font-sans select-none">
       
@@ -237,90 +295,17 @@ export default function DriverTripView({ tripId, onBackToDashboard }) {
         </div>
       </div>
 
-      {/* SVG Map Section */}
+      {/* Map Section */}
       <div className="relative w-full h-[460px] bg-slate-900 flex-shrink-0 z-10 overflow-hidden">
-        {/* Mock Map Paths */}
-        <svg className="absolute inset-0 w-full h-full object-cover" viewBox="0 0 400 460" xmlns="http://www.w3.org/2000/svg">
-          {/* Grid lines to make it feel like a real digital map */}
-          <defs>
-            <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
-              <path d="M 40 0 L 0 0 0 40" fill="none" stroke="rgba(51, 65, 85, 0.2)" strokeWidth="1" />
-            </pattern>
-            <linearGradient id="routeGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-              <stop offset="0%" stopColor="#3b82f6" />
-              <stop offset="100%" stopColor="#10b981" />
-            </linearGradient>
-          </defs>
-          <rect width="100%" height="100%" fill="url(#grid)" />
-
-          {/* Road Network Paths */}
-          <path d="M-50 120 L450 120" stroke="rgba(71, 85, 105, 0.3)" strokeWidth="16" fill="none" strokeLinecap="round" />
-          <path d="M60 -50 L60 520" stroke="rgba(71, 85, 105, 0.3)" strokeWidth="16" fill="none" strokeLinecap="round" />
-          <path d="M220 -50 L220 520" stroke="rgba(71, 85, 105, 0.3)" strokeWidth="20" fill="none" strokeLinecap="round" />
-          <path d="M-50 360 L450 360" stroke="rgba(71, 85, 105, 0.3)" strokeWidth="24" fill="none" strokeLinecap="round" />
-          
-          {/* Main Highway Loop (Route Path) */}
-          <path d="M 60 120 Q 140 120 220 200 T 220 360" stroke="rgba(30, 41, 59, 0.8)" strokeWidth="12" fill="none" strokeLinecap="round" />
-          
-          {/* Navigation Route Progress Line */}
-          {tripState !== 'completed' && (
-            <path 
-              d="M 60 120 Q 140 120 220 200 T 220 360" 
-              stroke="url(#routeGradient)" 
-              strokeWidth="6" 
-              fill="none" 
-              strokeLinecap="round"
-              strokeDasharray={tripState === 'in_progress' ? '8 4' : 'none'}
-              className={tripState === 'in_progress' ? 'animate-[dash_2s_linear_infinite]' : ''}
-            />
-          )}
-
-          {/* Navigation Dash animation */}
-          <style>{`
-            @keyframes dash {
-              to {
-                stroke-dashoffset: -20;
-              }
-            }
-          `}</style>
-
-          {/* Pickup Marker (A) */}
-          <g transform="translate(60, 120)">
-            <circle r="16" fill="#3b82f6" fillOpacity="0.15" />
-            <circle r="8" fill="#3b82f6" />
-            <circle r="4" fill="#ffffff" />
-            <text y="-20" textAnchor="middle" fill="#94a3b8" fontSize="10" fontWeight="bold">WG Building</text>
-          </g>
-
-          {/* Drop-off Marker (B) */}
-          <g transform="translate(220, 360)">
-            <circle r="16" fill="#10b981" fillOpacity="0.15" />
-            <circle r="8" fill="#10b981" />
-            <circle r="4" fill="#ffffff" />
-            <text y="24" textAnchor="middle" fill="#94a3b8" fontSize="10" fontWeight="bold">AL Block</text>
-          </g>
-
-          {/* Driver Car Icon (Moving/Static depending on state) */}
-          {tripState === 'not_started' && (
-            <g transform="translate(60, 120)" className="transition-transform duration-1000">
-              <circle r="22" fill="#0f766e" fillOpacity="0.25" className="animate-ping" />
-              <circle r="12" fill="#0f766e" stroke="#ffffff" strokeWidth="2" />
-              <path d="M-4 -3 L4 -3 L5 3 L-5 3 Z" fill="#ffffff" />
-            </g>
-          )}
-
-          {tripState === 'in_progress' && (
-            <g transform="translate(160, 150)" className="animate-bounce">
-              <circle r="22" fill="#3b82f6" fillOpacity="0.2" className="animate-ping" />
-              <circle r="12" fill="#3b82f6" stroke="#ffffff" strokeWidth="2" />
-              {/* Simple car shape representing route progression */}
-              <path d="M -4 -2 L 4 -2 L 6 3 L -6 3 Z" fill="#ffffff" />
-            </g>
-          )}
-        </svg>
+        <RouteMap 
+          origin={routeOrigin} 
+          destination={routeDestination} 
+          height="100%" 
+          style={{ border: 'none', borderRadius: 0 }}
+        />
 
         {/* Minimal Directions overlay */}
-        <div className="absolute top-24 left-6 right-6 p-4 bg-slate-950/85 backdrop-blur-lg rounded-2xl border border-slate-800 shadow-lg flex items-center gap-4 transition-all duration-300">
+        <div className="absolute top-24 left-6 right-6 p-4 bg-slate-950/85 backdrop-blur-lg rounded-2xl border border-slate-800 shadow-lg flex items-center gap-4 transition-all duration-300 z-[1000]">
           <div className="w-10 h-10 rounded-xl bg-teal-500/10 border border-teal-500/30 flex items-center justify-center text-teal-400">
             <svg className="w-5 h-5 stroke-current fill-none stroke-2" viewBox="0 0 24 24">
               <path d="M9 11l3-3 3 3m-3-3v8" />
@@ -329,12 +314,12 @@ export default function DriverTripView({ tripId, onBackToDashboard }) {
           <div>
             <div className="text-xs text-slate-400 font-semibold uppercase tracking-wider">
               {tripState === 'not_started' && 'Pickup Destination'}
-              {tripState === 'in_progress' && 'Next Turn in 400m'}
+              {tripState === 'in_progress' && 'Navigation Active'}
               {tripState === 'completed' && 'Trip Completed'}
             </div>
             <div className="text-sm font-bold text-slate-100">
-              {tripState === 'not_started' && 'Head to WG Building Entrance'}
-              {tripState === 'in_progress' && 'Turn right onto Esmonde Rd'}
+              {tripState === 'not_started' && `Head to ${activePassenger.name}'s pickup location`}
+              {tripState === 'in_progress' && `Heading to drop-off: ${activePassenger.dropoff}`}
               {tripState === 'completed' && 'Thank you for driving!'}
             </div>
           </div>

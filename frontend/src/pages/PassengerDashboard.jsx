@@ -36,6 +36,7 @@ function formatDeparture(departureTime) {
  */
 function PassengerDashboard() {
   const [upcomingRides, setUpcomingRides] = useState([]);
+  const [associatedTrips, setAssociatedTrips] = useState({});
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState('');
@@ -131,6 +132,28 @@ function PassengerDashboard() {
       },
     );
   }, []);
+
+  useEffect(() => {
+    if (!firebaseReady || !db || upcomingRides.length === 0) {
+      return undefined;
+    }
+
+    const tripIds = [...new Set(upcomingRides.map((r) => r.tripId).filter(Boolean))];
+    const unsubscribes = tripIds.map((tId) => {
+      return onSnapshot(doc(db, FIRESTORE_COLLECTIONS.trips, tId), (docSnap) => {
+        if (docSnap.exists()) {
+          setAssociatedTrips((prev) => ({
+            ...prev,
+            [tId]: { id: docSnap.id, ...docSnap.data() },
+          }));
+        }
+      });
+    });
+
+    return () => {
+      unsubscribes.forEach((unsub) => unsub());
+    };
+  }, [upcomingRides]);
 
   useEffect(() => {
     if (!firebaseReady || !auth || !db || !auth.currentUser) {
@@ -351,7 +374,15 @@ function PassengerDashboard() {
    */
   const now = new Date();
   
-  const actualUpcomingRides = upcomingRides.filter(ride => {
+  const ridesWithRealtimeTrips = upcomingRides.map(ride => {
+    const realtimeTrip = ride.tripId ? associatedTrips[ride.tripId] : null;
+    return {
+      ...ride,
+      trip: realtimeTrip || ride.trip
+    };
+  });
+
+  const actualUpcomingRides = ridesWithRealtimeTrips.filter(ride => {
     if (ride.status === RIDE_REQUEST_STATUS.pending) return true;
     if (ride.status === RIDE_REQUEST_STATUS.approved) {
       const tripStatus = ride.trip?.status;
@@ -365,7 +396,7 @@ function PassengerDashboard() {
     return false;
   });
 
-  const actualPastRides = upcomingRides.filter(ride => {
+  const actualPastRides = ridesWithRealtimeTrips.filter(ride => {
     if (ride.status === RIDE_REQUEST_STATUS.approved) {
       const tripStatus = ride.trip?.status;
       if (tripStatus === 'completed') return true;
