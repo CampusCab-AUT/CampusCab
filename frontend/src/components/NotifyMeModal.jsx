@@ -24,6 +24,10 @@ const KEYFRAMES = `
   from { opacity: 0; transform: translateY(8px); }
   to   { opacity: 1; transform: translateY(0); }
 }
+@media (max-width: 480px) {
+  .notifyme-actions { grid-template-columns: 1fr !important; }
+  .notifyme-scope   { grid-template-columns: 1fr !important; }
+}
 `;
 
 const SCOPE_OPTIONS = [
@@ -35,6 +39,7 @@ const SCOPE_OPTIONS = [
 function SegmentedControl({ value, onChange }) {
   return (
     <div
+      className="notifyme-scope"
       role="radiogroup"
       aria-label="Alert duration"
       style={{
@@ -366,6 +371,7 @@ const NotifyMeModal = ({ open, onClose, prefill, onSaved }) => {
               )}
 
               <div
+                className="notifyme-actions"
                 style={{
                   display: 'grid',
                   gridTemplateColumns: '1fr 1.4fr',
