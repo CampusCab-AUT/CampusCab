@@ -19,6 +19,7 @@ export const FIRESTORE_COLLECTIONS = {
   auditLogs: 'auditLogs',
   chats: 'chats',
   calls: 'calls',
+  routeAlerts: 'routeAlerts',
 };
 
 /**
@@ -64,6 +65,7 @@ export const NOTIFICATION_TYPES = {
   adminRequest: 'admin_request',
   safetyCheckIn: 'safety_check_in',
   safetyAlert: 'safety_alert',
+  routeAlertMatch: 'route_alert_match',
 };
 
 /**
@@ -82,3 +84,22 @@ export const SAFETY_CHECK_IN_STATUS = {
  */
 export const SAFETY_ALERT_CATEGORY = 'SAFETY_ALERT';
 
+/**
+ * Represents the lifecycle of a passenger route alert.
+ * @constant {Object}
+ */
+export const ROUTE_ALERT_STATUS = {
+  active: 'active',
+  paused: 'paused',
+  fulfilled: 'fulfilled',
+};
+
+/**
+ * Scope options that control how long a route alert remains eligible to match new trips.
+ * @constant {Object}
+ */
+export const ROUTE_ALERT_SCOPE = {
+  date: 'date',
+  week: 'week',
+  ongoing: 'ongoing',
+};

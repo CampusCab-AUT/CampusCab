@@ -13,6 +13,7 @@ import useSavedAddresses from '../hooks/useSavedAddresses';
 import * as turf from '@turf/turf';
 import { filterTripsByTimeOfDay } from '../utils/timeFilters';
 import { formatNZD } from '../utils/currency';
+import NotifyMeModal from '../components/NotifyMeModal';
 
 function isSameDepartureDate(departureTime, selectedDate) {
   return Boolean(departureTime && selectedDate && departureTime.startsWith(selectedDate));
@@ -41,7 +42,14 @@ const SearchTrips = ({ onTripSelect }) => {
   const [hasSearched, setHasSearched] = useState(false);
   const [timeFilter, setTimeFilter] = useState('All');
   const [currentUserGender, setCurrentUserGender] = useState(null);
+  const [notifyOpen, setNotifyOpen] = useState(false);
+  const [alertSaved, setAlertSaved] = useState(false);
   const { savedAddresses } = useSavedAddresses();
+
+  useEffect(() => {
+    // Reset the "alert active" confirmation chip whenever the user re-runs a search.
+    setAlertSaved(false);
+  }, [campus, date, time]);
 
   useEffect(() => {
     if (!firebaseReady || !db || !auth?.currentUser) return;
@@ -209,10 +217,85 @@ const SearchTrips = ({ onTripSelect }) => {
         )}
         
         {!loading && hasSearched && trips.length === 0 && !error && (
-          <div style={{ textAlign: 'center', padding: spacing.xl, ...surfaces.innerCard, backgroundColor: 'transparent', borderStyle: 'dashed' }}>
-            <p style={{ ...typography.body, color: colors.textSubtle }}>No rides available for this time.</p>
+          <div
+            style={{
+              ...surfaces.innerCard,
+              padding: spacing.xl,
+              backgroundColor: '#ffffff',
+              borderStyle: 'dashed',
+              textAlign: 'center',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              gap: spacing.md,
+            }}
+          >
+            <div
+              aria-hidden="true"
+              style={{
+                width: 64,
+                height: 64,
+                borderRadius: '50%',
+                background: colors.accentGradient,
+                color: '#ffffff',
+                fontSize: '1.6rem',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                boxShadow: '0 14px 28px rgba(15, 118, 110, 0.28)',
+              }}
+            >
+              🔔
+            </div>
+            <div>
+              <h3 style={{ ...typography.h2, margin: 0 }}>No rides yet — but we've got you.</h3>
+              <p style={{ ...typography.body, marginTop: spacing.xs, marginBottom: 0 }}>
+                Turn on a route alert and we'll send a push the second a driver posts a matching trip.
+              </p>
+            </div>
+            {alertSaved ? (
+              <div
+                style={{
+                  ...pills.base,
+                  ...pills.success,
+                  fontSize: '0.78rem',
+                  padding: '8px 14px',
+                }}
+              >
+                ✓ Alert active — manage it in My Alerts
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setNotifyOpen(true)}
+                disabled={!campus || !date}
+                style={{
+                  ...buttons.accent,
+                  width: 'auto',
+                  minWidth: '220px',
+                  opacity: !campus || !date ? 0.6 : 1,
+                  cursor: !campus || !date ? 'not-allowed' : 'pointer',
+                }}
+              >
+                🔔 Notify me
+              </button>
+            )}
           </div>
         )}
+
+        <NotifyMeModal
+          open={notifyOpen}
+          onClose={() => setNotifyOpen(false)}
+          onSaved={() => setAlertSaved(true)}
+          prefill={{
+            campus,
+            date,
+            time,
+            passengerLocation,
+            pickupLabel: passengerLocation?.name || null,
+            passengerGender: currentUserGender,
+          }}
+        />
         
         {!loading && hasSearched && trips.length > 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.md }}>
