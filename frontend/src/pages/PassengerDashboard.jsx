@@ -32,6 +32,7 @@ import LeaveRatingModal from '../components/LeaveRatingModal';
 import ReportUserModal from '../components/ReportUserModal';
 import ChatWindow from '../components/ChatWindow';
 import { canViewChat } from '../utils/chatPermissions';
+import PassengerLiveTracking from '../components/PassengerLiveTracking';
 
 function formatDeparture(departureTime) {
   if (!departureTime) return 'Departure time unavailable';
@@ -67,6 +68,7 @@ function PassengerDashboard() {
   const [safetyActionState, setSafetyActionState] = useState({});
   const [view, setView] = useState('rides'); // 'rides' | 'alerts'
   const [activeAlertCount, setActiveAlertCount] = useState(0);
+  const [trackingRide, setTrackingRide] = useState(null);
 
   useEffect(() => {
     if (!firebaseReady || !auth?.currentUser || !db) return undefined;
@@ -578,6 +580,27 @@ function PassengerDashboard() {
     );
   }
 
+  if (trackingRide) {
+    const tripForRide = associatedTrips[trackingRide.tripId] || trackingRide.trip;
+    return (
+      <div style={{ padding: '20px' }}>
+        <PassengerLiveTracking
+          ride={trackingRide}
+          trip={tripForRide}
+          onBack={() => setTrackingRide(null)}
+          onOpenChat={() => setChatModalRide(trackingRide)}
+        />
+        {chatModalRide && (
+          <ChatWindow
+            rideRequest={chatModalRide}
+            currentUser={auth.currentUser}
+            onClose={() => setChatModalRide(null)}
+          />
+        )}
+      </div>
+    );
+  }
+
   return (
     <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '20px' }}>
       <header style={{ borderBottom: '1px solid #eee', paddingBottom: '20px', marginBottom: '30px' }}>
@@ -884,6 +907,24 @@ function PassengerDashboard() {
                               }}
                             >
                               Chat with Driver
+                            </button>
+                          )}
+
+                          {ride.status === RIDE_REQUEST_STATUS.approved && (
+                            <button
+                              type="button"
+                              onClick={() => setTrackingRide(ride)}
+                              style={{
+                                border: '1px solid #0f766e',
+                                borderRadius: '8px',
+                                backgroundColor: '#0f766e',
+                                color: '#fff',
+                                cursor: 'pointer',
+                                fontWeight: 700,
+                                padding: '9px 12px',
+                              }}
+                            >
+                              Track Driver
                             </button>
                           )}
                         </div>
