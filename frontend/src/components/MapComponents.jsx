@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { MapContainer, TileLayer, Marker, Polyline, useMap } from 'react-leaflet';
 import L from 'leaflet';
+import * as turf from '@turf/turf';
 import { inputs, surfaces, colors, radius, typography, pills, spacing } from '../theme';
 
 // Fix Leaflet marker icons in Vite
@@ -227,6 +228,183 @@ export function RouteMap({ origin, destination, setRouteGeoJson, height = '300px
         {destination && <Marker position={[destination.lat, destination.lon]} />}
         {routeCoords.length > 0 && <Polyline positions={routeCoords} color={colors.accent} weight={5} />}
       </MapContainer>
+    </div>
+  );
+}
+
+export function LiveRouteMap({ 
+  origin, 
+  destination, 
+  currentLocation, 
+  height = '300px', 
+  style = {} 
+}) {
+  const [routeCoords, setRouteCoords] = useState([]);
+  const [routeGeoJson, setRouteGeoJson] = useState(null);
+  const [autoCenter, setAutoCenter] = useState(true);
+
+  const routeFetchedRef = useRef(false);
+
+  // Reset route fetched flag if origin/destination changes
+  useEffect(() => {
+    routeFetchedRef.current = false;
+  }, [origin, destination]);
+
+  // Initial route setup from origin (or currentLocation if origin is not set) to destination
+  useEffect(() => {
+    const startLoc = origin || currentLocation;
+    if (startLoc && destination && !routeFetchedRef.current) {
+      routeFetchedRef.current = true;
+      fetch(`https://router.project-osrm.org/route/v1/driving/${startLoc.lon},${startLoc.lat};${destination.lon},${destination.lat}?overview=full&geometries=geojson`)
+        .then(r => r.json())
+        .then(data => {
+          if (data.routes && data.routes.length > 0) {
+            const geojson = data.routes[0].geometry;
+            setRouteGeoJson(geojson);
+            const coords = geojson.coordinates.map(c => [c[1], c[0]]);
+            setRouteCoords(coords);
+          }
+        })
+        .catch(err => {
+          routeFetchedRef.current = false;
+          console.error("Error fetching initial route:", err);
+        });
+    }
+  }, [origin, destination, currentLocation]);
+
+  // Check if driver is off-route whenever currentLocation changes
+  useEffect(() => {
+    if (!currentLocation || !routeGeoJson || !destination) return;
+
+    try {
+      // Create a turf point for currentLocation
+      const pt = turf.point([currentLocation.lon, currentLocation.lat]);
+      // Calculate distance from point to current route line
+      const distance = turf.pointToLineDistance(pt, routeGeoJson, { units: 'meters' });
+
+      // If off-route by more than 50 meters, recalculate
+      if (distance > 50) {
+        console.log(`Driver off-route by ${distance.toFixed(1)} meters. Recalculating...`);
+        fetch(`https://router.project-osrm.org/route/v1/driving/${currentLocation.lon},${currentLocation.lat};${destination.lon},${destination.lat}?overview=full&geometries=geojson`)
+          .then(r => r.json())
+          .then(data => {
+            if (data.routes && data.routes.length > 0) {
+              const geojson = data.routes[0].geometry;
+              setRouteGeoJson(geojson);
+              const coords = geojson.coordinates.map(c => [c[1], c[0]]);
+              setRouteCoords(coords);
+            }
+          })
+          .catch(err => console.error("Error recalculating route:", err));
+      }
+    } catch (e) {
+      console.error("Error in off-route check:", e);
+    }
+  }, [currentLocation, routeGeoJson, destination]);
+
+  const defaultCenter = [-36.8485, 174.7633]; // Auckland
+  const mapCenter = currentLocation 
+    ? [currentLocation.lat, currentLocation.lon] 
+    : (origin ? [origin.lat, origin.lon] : defaultCenter);
+
+  const bounds = L.latLngBounds([]);
+  if (currentLocation) bounds.extend([currentLocation.lat, currentLocation.lon]);
+  else if (origin) bounds.extend([origin.lat, origin.lon]);
+  if (destination) bounds.extend([destination.lat, destination.lon]);
+  if (routeCoords.length > 0) {
+    routeCoords.forEach(c => bounds.extend(c));
+  }
+
+  // Create a custom pulsing marker for the driver location
+  const driverIcon = new L.DivIcon({
+    html: `<div class="live-driver-pulsing-dot" style="
+      background-color: ${colors.accent || '#14b8a6'};
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      border: 3px solid white;
+      box-shadow: 0 0 8px rgba(0,0,0,0.5);
+    "></div>`,
+    className: 'custom-driver-icon',
+    iconSize: [16, 16],
+    iconAnchor: [8, 8]
+  });
+
+  return (
+    <div style={{ height: height, width: '100%', borderRadius: radius.md, overflow: 'hidden', border: `1px solid ${colors.border}`, position: 'relative', zIndex: 0, ...style }}>
+      <MapContainer center={mapCenter} zoom={15} style={{ height: '100%', width: '100%', zIndex: 0 }}>
+        <TileLayer
+          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+        />
+        <ChangeView 
+          center={autoCenter && currentLocation ? [currentLocation.lat, currentLocation.lon] : null} 
+          bounds={(!autoCenter || !currentLocation) && bounds.isValid() ? bounds : null} 
+        />
+        
+        {routeCoords.length > 0 && <Polyline positions={routeCoords} color={colors.accent || '#14b8a6'} weight={5} />}
+
+        {origin && <Marker position={[origin.lat, origin.lon]} />}
+        {destination && <Marker position={[destination.lat, destination.lon]} />}
+
+        {currentLocation && (
+          <Marker position={[currentLocation.lat, currentLocation.lon]} icon={driverIcon} />
+        )}
+      </MapContainer>
+
+      {/* Auto Center Toggle Control */}
+      <button 
+        onClick={() => setAutoCenter(!autoCenter)}
+        style={{
+          position: 'absolute',
+          bottom: '16px',
+          right: '16px',
+          zIndex: 1000,
+          background: autoCenter ? (colors.accent || '#14b8a6') : '#1e293b',
+          color: 'white',
+          border: 'none',
+          borderRadius: '50%',
+          width: '40px',
+          height: '40px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          cursor: 'pointer',
+          boxShadow: '0 4px 6px rgba(0,0,0,0.3)',
+          transition: 'all 0.2s'
+        }}
+        title={autoCenter ? "Disable Auto Center" : "Enable Auto Center"}
+      >
+        <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24" style={{ width: '20px', height: '20px' }}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M15 10.5a3 3 0 11-6 0 3 3 0 016 0z" />
+          <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1115 0z" />
+        </svg>
+      </button>
+
+      <style>{`
+        .live-driver-pulsing-dot::after {
+          content: '';
+          position: absolute;
+          width: 32px;
+          height: 32px;
+          border-radius: 50%;
+          border: 2px solid ${colors.accent || '#14b8a6'};
+          top: -11px;
+          left: -11px;
+          animation: pulse-ring 1.8s cubic-bezier(0.215, 0.610, 0.355, 1) infinite;
+          opacity: 0;
+        }
+        @keyframes pulse-ring {
+          0% {
+            transform: scale(0.33);
+            opacity: 0.8;
+          }
+          80%, 100% {
+            opacity: 0;
+            transform: scale(1.2);
+          }
+        }
+      `}</style>
     </div>
   );
 }
