@@ -236,6 +236,7 @@ export function LiveRouteMap({
   origin, 
   destination, 
   currentLocation, 
+  onRouteUpdate,
   height = '300px', 
   style = {} 
 }) {
@@ -263,6 +264,12 @@ export function LiveRouteMap({
             setRouteGeoJson(geojson);
             const coords = geojson.coordinates.map(c => [c[1], c[0]]);
             setRouteCoords(coords);
+            if (onRouteUpdate) {
+              onRouteUpdate({
+                duration: data.routes[0].duration, // in seconds
+                distance: data.routes[0].distance // in meters
+              });
+            }
           }
         })
         .catch(err => {
@@ -270,7 +277,7 @@ export function LiveRouteMap({
           console.error("Error fetching initial route:", err);
         });
     }
-  }, [origin, destination, currentLocation]);
+  }, [origin, destination, currentLocation, onRouteUpdate]);
 
   // Check if driver is off-route whenever currentLocation changes
   useEffect(() => {
@@ -293,6 +300,12 @@ export function LiveRouteMap({
               setRouteGeoJson(geojson);
               const coords = geojson.coordinates.map(c => [c[1], c[0]]);
               setRouteCoords(coords);
+              if (onRouteUpdate) {
+                onRouteUpdate({
+                  duration: data.routes[0].duration,
+                  distance: data.routes[0].distance
+                });
+              }
             }
           })
           .catch(err => console.error("Error recalculating route:", err));
@@ -300,7 +313,7 @@ export function LiveRouteMap({
     } catch (e) {
       console.error("Error in off-route check:", e);
     }
-  }, [currentLocation, routeGeoJson, destination]);
+  }, [currentLocation, routeGeoJson, destination, onRouteUpdate]);
 
   const defaultCenter = [-36.8485, 174.7633]; // Auckland
   const mapCenter = currentLocation 
