@@ -185,9 +185,11 @@ function TabBar({ active, onChange, reportCount }) {
 
 // ─── Overview tab ─────────────────────────────────────────────────────────────
 
-function OverviewTab({ profile, onSuspend, onUnsuspend, suspending, unsuspending }) {
+function OverviewTab({ profile, onSuspend, onUnsuspend, suspending, unsuspending, onClearFlag, clearingFlag }) {
   const isSuspended = profile.accountStatus === 'Suspended';
   const countdown = suspensionCountdown(profile.suspendedAt, profile.suspensionDuration);
+  const isFlagged = profile.flaggedForLateCancellations === true;
+  const lateCancelCount = profile.lateCancelCount || 0;
 
   const detailRow = (label, value) => (
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 0', borderBottom: '1px solid #f0f2f5' }}>
@@ -197,7 +199,45 @@ function OverviewTab({ profile, onSuspend, onUnsuspend, suspending, unsuspending
   );
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+
+      {/* Late-cancellation flag banner */}
+      {(isFlagged || lateCancelCount >= 2) && (
+        <div style={{
+          borderRadius: '14px', padding: '16px 20px',
+          background: isFlagged ? '#fff7ed' : '#fffbeb',
+          border: `1.5px solid ${isFlagged ? '#fed7aa' : '#fde68a'}`,
+          display: 'flex', alignItems: 'flex-start', gap: 14,
+        }}>
+          <span style={{ fontSize: 24, flexShrink: 0 }}>{isFlagged ? '🚩' : '⚠️'}</span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontWeight: 800, fontSize: 14, color: isFlagged ? '#92400e' : '#78350f', marginBottom: 4 }}>
+              {isFlagged ? 'Flagged: Repeated Late Cancellations' : 'Warning: Approaching Late-Cancellation Threshold'}
+            </div>
+            <div style={{ fontSize: 13, color: isFlagged ? '#b45309' : '#92400e' }}>
+              This passenger has cancelled {lateCancelCount} approved ride{lateCancelCount !== 1 ? 's' : ''} within 30 minutes of departure.
+              {isFlagged ? ' They have reached the 3-strike threshold and have been automatically flagged.' : ' One more late cancellation will trigger an automatic flag.'}
+            </div>
+          </div>
+          {isFlagged && (
+            <button
+              onClick={onClearFlag}
+              disabled={clearingFlag}
+              style={{
+                flexShrink: 0, padding: '7px 14px', borderRadius: '8px', fontSize: 12, fontWeight: 700,
+                border: '1.5px solid #fed7aa', background: 'white', cursor: clearingFlag ? 'not-allowed' : 'pointer',
+                color: '#92400e', transition: 'all 0.12s',
+              }}
+              onMouseEnter={e => { if (!clearingFlag) { e.currentTarget.style.background = '#fed7aa'; } }}
+              onMouseLeave={e => { e.currentTarget.style.background = 'white'; }}
+            >
+              {clearingFlag ? 'Clearing…' : 'Clear Flag'}
+            </button>
+          )}
+        </div>
+      )}
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
 
       {/* Account details */}
       <div style={{ background: 'white', borderRadius: '14px', border: '1px solid #e8eaed', padding: '20px' }}>
@@ -278,6 +318,7 @@ function OverviewTab({ profile, onSuspend, onUnsuspend, suspending, unsuspending
           </>
         )}
       </div>
+    </div>
     </div>
   );
 }
@@ -639,6 +680,22 @@ export default function UserProfilePage({ userId, onBack }) {
       },
     });
 
+  const [clearingFlag, setClearingFlag] = useState(false);
+  const handleClearFlag = async () => {
+    if (!window.confirm('Clear the late-cancellation flag? This will reset the flag but keep the strike count.')) return;
+    setClearingFlag(true);
+    try {
+      await updateDoc(doc(db, FIRESTORE_COLLECTIONS.users, userId), {
+        flaggedForLateCancellations: false,
+      });
+      setProfile((prev) => ({ ...prev, flaggedForLateCancellations: false }));
+    } catch (err) {
+      alert('Failed to clear flag: ' + err.message);
+    } finally {
+      setClearingFlag(false);
+    }
+  };
+
   // Load profile
   useEffect(() => {
     (async () => {
@@ -885,6 +942,7 @@ export default function UserProfilePage({ userId, onBack }) {
             <StatBox label="Reports Received"  value={reports.length}           icon="⚑"  accent={reports.length > 0 ? '#dc2626' : '#64748b'} />
             <StatBox label="Account Age"       value={accountAge(profile?.createdAt)} icon="📅" accent="#6c63ff" />
             <StatBox label="Moderation Events" value={auditLogs.length}         icon="📋" accent="#f59e0b" />
+            <StatBox label="Late Cancels"      value={profile?.lateCancelCount || 0} icon="⏱" accent={(profile?.lateCancelCount || 0) >= 3 ? '#dc2626' : (profile?.lateCancelCount || 0) >= 2 ? '#f59e0b' : '#64748b'} />
           </div>
         </div>
 
@@ -903,6 +961,8 @@ export default function UserProfilePage({ userId, onBack }) {
             onUnsuspend={handleUnsuspend}
             suspending={suspending}
             unsuspending={unsuspending}
+            onClearFlag={handleClearFlag}
+            clearingFlag={clearingFlag}
           />
         )}
         {activeTab === 'reports' && (
