@@ -854,3 +854,56 @@ exports.onTripCreated = functions.firestore
 
 // Exported for unit testing the matching helper.
 exports._internal = { tripMatchesAlert, haversineKm };
+
+// ─── HTTP API — serves /api/** via Firebase Hosting rewrite ──────────────────
+// Handles admin REST calls so no separate Express server is needed in production.
+
+exports.api = functions.https.onRequest(async (req, res) => {
+  // CORS
+  res.set('Access-Control-Allow-Origin', '*');
+  res.set('Access-Control-Allow-Headers', 'Authorization, Content-Type');
+  if (req.method === 'OPTIONS') { res.status(204).send(''); return; }
+
+  // Verify admin JWT
+  const authHeader = req.headers.authorization || '';
+  if (!authHeader.startsWith('Bearer ')) {
+    res.status(401).json({ error: 'Unauthorized' }); return;
+  }
+  let adminUid;
+  try {
+    const decoded = await admin.auth().verifyIdToken(authHeader.split('Bearer ')[1]);
+    const adminDoc = await db.collection('users').doc(decoded.uid).get();
+    if (!adminDoc.exists || adminDoc.data().role !== 'Admin') {
+      res.status(403).json({ error: 'Forbidden: Admin access required' }); return;
+    }
+    adminUid = decoded.uid;
+  } catch {
+    res.status(401).json({ error: 'Invalid token' }); return;
+  }
+
+  // Route: GET /api/admin/users/:userId
+  const userMatch = req.path.match(/^\/admin\/users\/([^/]+)$/);
+  if (req.method === 'GET' && userMatch) {
+    const userId = userMatch[1];
+    const [userDoc, authUser] = await Promise.allSettled([
+      db.collection('users').doc(userId).get(),
+      admin.auth().getUser(userId),
+    ]);
+
+    if (userDoc.status === 'rejected' || !userDoc.value.exists) {
+      res.status(404).json({ error: 'User not found' }); return;
+    }
+
+    const data = { id: userDoc.value.id, ...userDoc.value.data() };
+    if (authUser.status === 'fulfilled') {
+      const a = authUser.value;
+      if (!data.email && a.email) data.email = a.email;
+      if (!data.displayName && !data.name && a.displayName) data.displayName = a.displayName;
+      if (!data.createdAt && a.metadata?.creationTime) data.createdAt = a.metadata.creationTime;
+    }
+    res.json(data); return;
+  }
+
+  functions.logger.warn('api: unmatched route', { method: req.method, path: req.path, adminUid });
+  res.status(404).json({ error: 'Not found' });
+});

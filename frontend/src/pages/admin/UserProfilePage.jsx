@@ -9,7 +9,7 @@ import {
   updateDoc,
   where,
 } from 'firebase/firestore';
-import { db } from '../../firebase';
+import { auth, db } from '../../firebase';
 import { FIRESTORE_COLLECTIONS } from '../../firestoreModel';
 import { useSuspension } from '../../hooks/useSuspension';
 import SuspensionModal from '../../components/admin/SuspensionModal';
@@ -185,7 +185,7 @@ function TabBar({ active, onChange, reportCount }) {
 
 // ─── Overview tab ─────────────────────────────────────────────────────────────
 
-function OverviewTab({ profile, onSuspend, onUnsuspend, suspending, unsuspending, onClearFlag, clearingFlag }) {
+function OverviewTab({ profile, resolvedEmail, resolvedCreatedAt, onSuspend, onUnsuspend, suspending, unsuspending, onClearFlag, clearingFlag }) {
   const isSuspended = profile.accountStatus === 'Suspended';
   const countdown = suspensionCountdown(profile.suspendedAt, profile.suspensionDuration);
   const isFlagged = profile.flaggedForLateCancellations === true;
@@ -247,11 +247,11 @@ function OverviewTab({ profile, onSuspend, onUnsuspend, suspending, unsuspending
           </svg>
           Account Details
         </h3>
-        {detailRow('Email', profile.email || '—')}
+        {detailRow('Email', resolvedEmail || '—')}
         {detailRow('UID', <span style={{ fontFamily: 'monospace', fontSize: 12, background: '#f8fafc', padding: '2px 6px', borderRadius: 4 }}>{profile.id}</span>)}
         {detailRow('Role', <RoleBadge role={profile.role} />)}
-        {detailRow('Joined', fmtDate(profile.createdAt))}
-        {detailRow('Account Age', accountAge(profile.createdAt))}
+        {detailRow('Joined', fmtDate(resolvedCreatedAt))}
+        {detailRow('Account Age', accountAge(resolvedCreatedAt))}
       </div>
 
       {/* Suspension panel */}
@@ -701,11 +701,55 @@ export default function UserProfilePage({ userId, onBack }) {
     (async () => {
       try {
         const snap = await getDoc(doc(db, FIRESTORE_COLLECTIONS.users, userId));
-        if (snap.exists()) {
-          setProfile({ id: snap.id, ...snap.data() });
-        } else {
-          setError('User not found.');
+        if (!snap.exists()) { setError('User not found.'); return; }
+
+        const data = snap.data();
+        const merged = { ...data };
+
+        const needsAuthFallback = !merged.email || !merged.createdAt;
+
+        if (needsAuthFallback) {
+          // Try current user's own Auth data first (no network cost)
+          const currentUser = auth?.currentUser;
+          if (currentUser?.uid === userId) {
+            if (!merged.email) merged.email = currentUser.email || '';
+            if (!merged.displayName && !merged.name) {
+              merged.displayName = currentUser.displayName || currentUser.email || '';
+            }
+            if (!merged.createdAt && currentUser.metadata?.creationTime) {
+              merged.createdAt = currentUser.metadata.creationTime;
+            }
+          } else if (currentUser) {
+            // For any other user: call the backend which uses Admin SDK to get Auth data
+            try {
+              const token = await currentUser.getIdToken();
+              const base = import.meta.env.VITE_API_BASE_URL ?? '';
+              const res = await fetch(
+                `${base}/api/admin/users/${userId}`,
+                { headers: { Authorization: `Bearer ${token}` } }
+              );
+              if (res.ok) {
+                const backendData = await res.json();
+                if (!merged.email && backendData.email) merged.email = backendData.email;
+                if (!merged.displayName && !merged.name && backendData.displayName) {
+                  merged.displayName = backendData.displayName;
+                }
+                if (!merged.createdAt && backendData.createdAt) merged.createdAt = backendData.createdAt;
+              }
+            } catch (_) { /* backend unavailable — show what we have */ }
+          }
+
+          // Backfill any newly found fields into Firestore
+          const patch = {};
+          if (!data.email && merged.email) patch.email = merged.email;
+          if (!data.displayName && !data.name && merged.displayName) patch.displayName = merged.displayName;
+          if (!data.createdAt && merged.createdAt) patch.createdAt = merged.createdAt;
+          if (Object.keys(patch).length > 0) {
+            updateDoc(doc(db, FIRESTORE_COLLECTIONS.users, userId), patch).catch(() => {});
+          }
         }
+
+        setProfile({ id: snap.id, ...merged });
       } catch (err) {
         setError(err.message);
       } finally {
@@ -783,7 +827,15 @@ export default function UserProfilePage({ userId, onBack }) {
     }
   };
 
-  const initials = getInitials(profile?.displayName || profile?.name, profile?.email);
+  // Synchronous Auth fallback — works for the currently logged-in user viewing their own profile.
+  // Does not require async/timing — auth.currentUser is populated before the dashboard renders.
+  const _authUser = auth?.currentUser?.uid === userId ? auth.currentUser : null;
+  const resolvedEmail    = profile?.email    || _authUser?.email || '';
+  const resolvedCreatedAt = profile?.createdAt || _authUser?.metadata?.creationTime || null;
+  const resolvedName     = profile?.displayName || profile?.name
+    || _authUser?.displayName || _authUser?.email || '';
+
+  const initials = getInitials(resolvedName, resolvedEmail);
   const isSuspended = profile?.accountStatus === 'Suspended';
 
   // ── Render loading ──
@@ -891,9 +943,9 @@ export default function UserProfilePage({ userId, onBack }) {
                 <RoleBadge role={profile?.role} />
                 <StatusBadge status={profile?.accountStatus || 'Active'} />
               </div>
-              <div style={{ fontSize: 13, color: '#64748b', marginBottom: 4 }}>{profile?.email || '—'}</div>
+              <div style={{ fontSize: 13, color: '#64748b', marginBottom: 4 }}>{resolvedEmail || '—'}</div>
               <div style={{ fontSize: 12, color: '#94a3b8', fontFamily: 'monospace' }}>uid: {userId}</div>
-              <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 4 }}>Joined {fmtDate(profile?.createdAt)}</div>
+              <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 4 }}>Joined {fmtDate(resolvedCreatedAt)}</div>
             </div>
 
             {/* Action button */}
@@ -940,7 +992,7 @@ export default function UserProfilePage({ userId, onBack }) {
             <StatBox label="Trips Posted"      value={trips.length}             icon="🚗" accent="#0f766e" />
             <StatBox label="Trips Joined"      value={rideRequests.length}      icon="🎒" accent="#1d4ed8" />
             <StatBox label="Reports Received"  value={reports.length}           icon="⚑"  accent={reports.length > 0 ? '#dc2626' : '#64748b'} />
-            <StatBox label="Account Age"       value={accountAge(profile?.createdAt)} icon="📅" accent="#6c63ff" />
+            <StatBox label="Account Age"       value={accountAge(resolvedCreatedAt)} icon="📅" accent="#6c63ff" />
             <StatBox label="Moderation Events" value={auditLogs.length}         icon="📋" accent="#f59e0b" />
             <StatBox label="Late Cancels"      value={profile?.lateCancelCount || 0} icon="⏱" accent={(profile?.lateCancelCount || 0) >= 3 ? '#dc2626' : (profile?.lateCancelCount || 0) >= 2 ? '#f59e0b' : '#64748b'} />
           </div>
@@ -957,6 +1009,8 @@ export default function UserProfilePage({ userId, onBack }) {
         {activeTab === 'overview' && profile && (
           <OverviewTab
             profile={profile}
+            resolvedEmail={resolvedEmail}
+            resolvedCreatedAt={resolvedCreatedAt}
             onSuspend={() => setShowModal(true)}
             onUnsuspend={handleUnsuspend}
             suspending={suspending}
