@@ -4,11 +4,31 @@ const { db, auth } = require('../config/firebaseConfig');
 const getUserProfile = async (req, res) => {
   try {
     const { userId } = req.params;
-    const userDoc = await db.collection('users').doc(userId).get();
-    if (!userDoc.exists) {
+    const [userDoc, authUser] = await Promise.allSettled([
+      db.collection('users').doc(userId).get(),
+      auth.getUser(userId),
+    ]);
+
+    if (userDoc.status === 'rejected' || !userDoc.value.exists) {
       return res.status(404).json({ error: 'User not found' });
     }
-    res.json({ id: userDoc.id, ...userDoc.data() });
+
+    const firestoreData = { id: userDoc.value.id, ...userDoc.value.data() };
+
+    // Merge Firebase Auth fields when Firestore document is missing them
+    // (e.g. manually-created admin accounts)
+    if (authUser.status === 'fulfilled') {
+      const a = authUser.value;
+      if (!firestoreData.email && a.email) firestoreData.email = a.email;
+      if (!firestoreData.displayName && !firestoreData.name && a.displayName) {
+        firestoreData.displayName = a.displayName;
+      }
+      if (!firestoreData.createdAt && a.metadata?.creationTime) {
+        firestoreData.createdAt = a.metadata.creationTime;
+      }
+    }
+
+    res.json(firestoreData);
   } catch (err) {
     console.error('getUserProfile error:', err);
     res.status(500).json({ error: 'Failed to fetch user profile' });

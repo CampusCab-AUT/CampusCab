@@ -9,7 +9,7 @@ import {
   updateDoc,
   where,
 } from 'firebase/firestore';
-import { db } from '../../firebase';
+import { auth, db } from '../../firebase';
 import { FIRESTORE_COLLECTIONS } from '../../firestoreModel';
 import { useSuspension } from '../../hooks/useSuspension';
 import SuspensionModal from '../../components/admin/SuspensionModal';
@@ -185,9 +185,11 @@ function TabBar({ active, onChange, reportCount }) {
 
 // ─── Overview tab ─────────────────────────────────────────────────────────────
 
-function OverviewTab({ profile, onSuspend, onUnsuspend, suspending, unsuspending }) {
+function OverviewTab({ profile, resolvedEmail, resolvedCreatedAt, onSuspend, onUnsuspend, suspending, unsuspending, onClearFlag, clearingFlag }) {
   const isSuspended = profile.accountStatus === 'Suspended';
   const countdown = suspensionCountdown(profile.suspendedAt, profile.suspensionDuration);
+  const isFlagged = profile.flaggedForLateCancellations === true;
+  const lateCancelCount = profile.lateCancelCount || 0;
 
   const detailRow = (label, value) => (
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 0', borderBottom: '1px solid #f0f2f5' }}>
@@ -197,7 +199,45 @@ function OverviewTab({ profile, onSuspend, onUnsuspend, suspending, unsuspending
   );
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+
+      {/* Late-cancellation flag banner */}
+      {(isFlagged || lateCancelCount >= 2) && (
+        <div style={{
+          borderRadius: '14px', padding: '16px 20px',
+          background: isFlagged ? '#fff7ed' : '#fffbeb',
+          border: `1.5px solid ${isFlagged ? '#fed7aa' : '#fde68a'}`,
+          display: 'flex', alignItems: 'flex-start', gap: 14,
+        }}>
+          <span style={{ fontSize: 24, flexShrink: 0 }}>{isFlagged ? '🚩' : '⚠️'}</span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontWeight: 800, fontSize: 14, color: isFlagged ? '#92400e' : '#78350f', marginBottom: 4 }}>
+              {isFlagged ? 'Flagged: Repeated Late Cancellations' : 'Warning: Approaching Late-Cancellation Threshold'}
+            </div>
+            <div style={{ fontSize: 13, color: isFlagged ? '#b45309' : '#92400e' }}>
+              This passenger has cancelled {lateCancelCount} approved ride{lateCancelCount !== 1 ? 's' : ''} within 30 minutes of departure.
+              {isFlagged ? ' They have reached the 3-strike threshold and have been automatically flagged.' : ' One more late cancellation will trigger an automatic flag.'}
+            </div>
+          </div>
+          {isFlagged && (
+            <button
+              onClick={onClearFlag}
+              disabled={clearingFlag}
+              style={{
+                flexShrink: 0, padding: '7px 14px', borderRadius: '8px', fontSize: 12, fontWeight: 700,
+                border: '1.5px solid #fed7aa', background: 'white', cursor: clearingFlag ? 'not-allowed' : 'pointer',
+                color: '#92400e', transition: 'all 0.12s',
+              }}
+              onMouseEnter={e => { if (!clearingFlag) { e.currentTarget.style.background = '#fed7aa'; } }}
+              onMouseLeave={e => { e.currentTarget.style.background = 'white'; }}
+            >
+              {clearingFlag ? 'Clearing…' : 'Clear Flag'}
+            </button>
+          )}
+        </div>
+      )}
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
 
       {/* Account details */}
       <div style={{ background: 'white', borderRadius: '14px', border: '1px solid #e8eaed', padding: '20px' }}>
@@ -207,11 +247,11 @@ function OverviewTab({ profile, onSuspend, onUnsuspend, suspending, unsuspending
           </svg>
           Account Details
         </h3>
-        {detailRow('Email', profile.email || '—')}
+        {detailRow('Email', resolvedEmail || '—')}
         {detailRow('UID', <span style={{ fontFamily: 'monospace', fontSize: 12, background: '#f8fafc', padding: '2px 6px', borderRadius: 4 }}>{profile.id}</span>)}
         {detailRow('Role', <RoleBadge role={profile.role} />)}
-        {detailRow('Joined', fmtDate(profile.createdAt))}
-        {detailRow('Account Age', accountAge(profile.createdAt))}
+        {detailRow('Joined', fmtDate(resolvedCreatedAt))}
+        {detailRow('Account Age', accountAge(resolvedCreatedAt))}
       </div>
 
       {/* Suspension panel */}
@@ -278,6 +318,7 @@ function OverviewTab({ profile, onSuspend, onUnsuspend, suspending, unsuspending
           </>
         )}
       </div>
+    </div>
     </div>
   );
 }
@@ -639,16 +680,76 @@ export default function UserProfilePage({ userId, onBack }) {
       },
     });
 
+  const [clearingFlag, setClearingFlag] = useState(false);
+  const handleClearFlag = async () => {
+    if (!window.confirm('Clear the late-cancellation flag? This will reset the flag but keep the strike count.')) return;
+    setClearingFlag(true);
+    try {
+      await updateDoc(doc(db, FIRESTORE_COLLECTIONS.users, userId), {
+        flaggedForLateCancellations: false,
+      });
+      setProfile((prev) => ({ ...prev, flaggedForLateCancellations: false }));
+    } catch (err) {
+      alert('Failed to clear flag: ' + err.message);
+    } finally {
+      setClearingFlag(false);
+    }
+  };
+
   // Load profile
   useEffect(() => {
     (async () => {
       try {
         const snap = await getDoc(doc(db, FIRESTORE_COLLECTIONS.users, userId));
-        if (snap.exists()) {
-          setProfile({ id: snap.id, ...snap.data() });
-        } else {
-          setError('User not found.');
+        if (!snap.exists()) { setError('User not found.'); return; }
+
+        const data = snap.data();
+        const merged = { ...data };
+
+        const needsAuthFallback = !merged.email || !merged.createdAt;
+
+        if (needsAuthFallback) {
+          // Try current user's own Auth data first (no network cost)
+          const currentUser = auth?.currentUser;
+          if (currentUser?.uid === userId) {
+            if (!merged.email) merged.email = currentUser.email || '';
+            if (!merged.displayName && !merged.name) {
+              merged.displayName = currentUser.displayName || currentUser.email || '';
+            }
+            if (!merged.createdAt && currentUser.metadata?.creationTime) {
+              merged.createdAt = currentUser.metadata.creationTime;
+            }
+          } else if (currentUser) {
+            // For any other user: call the backend which uses Admin SDK to get Auth data
+            try {
+              const token = await currentUser.getIdToken();
+              const base = import.meta.env.VITE_API_BASE_URL ?? '';
+              const res = await fetch(
+                `${base}/api/admin/users/${userId}`,
+                { headers: { Authorization: `Bearer ${token}` } }
+              );
+              if (res.ok) {
+                const backendData = await res.json();
+                if (!merged.email && backendData.email) merged.email = backendData.email;
+                if (!merged.displayName && !merged.name && backendData.displayName) {
+                  merged.displayName = backendData.displayName;
+                }
+                if (!merged.createdAt && backendData.createdAt) merged.createdAt = backendData.createdAt;
+              }
+            } catch (_) { /* backend unavailable — show what we have */ }
+          }
+
+          // Backfill any newly found fields into Firestore
+          const patch = {};
+          if (!data.email && merged.email) patch.email = merged.email;
+          if (!data.displayName && !data.name && merged.displayName) patch.displayName = merged.displayName;
+          if (!data.createdAt && merged.createdAt) patch.createdAt = merged.createdAt;
+          if (Object.keys(patch).length > 0) {
+            updateDoc(doc(db, FIRESTORE_COLLECTIONS.users, userId), patch).catch(() => {});
+          }
         }
+
+        setProfile({ id: snap.id, ...merged });
       } catch (err) {
         setError(err.message);
       } finally {
@@ -726,7 +827,15 @@ export default function UserProfilePage({ userId, onBack }) {
     }
   };
 
-  const initials = getInitials(profile?.displayName || profile?.name, profile?.email);
+  // Synchronous Auth fallback — works for the currently logged-in user viewing their own profile.
+  // Does not require async/timing — auth.currentUser is populated before the dashboard renders.
+  const _authUser = auth?.currentUser?.uid === userId ? auth.currentUser : null;
+  const resolvedEmail    = profile?.email    || _authUser?.email || '';
+  const resolvedCreatedAt = profile?.createdAt || _authUser?.metadata?.creationTime || null;
+  const resolvedName     = profile?.displayName || profile?.name
+    || _authUser?.displayName || _authUser?.email || '';
+
+  const initials = getInitials(resolvedName, resolvedEmail);
   const isSuspended = profile?.accountStatus === 'Suspended';
 
   // ── Render loading ──
@@ -834,9 +943,9 @@ export default function UserProfilePage({ userId, onBack }) {
                 <RoleBadge role={profile?.role} />
                 <StatusBadge status={profile?.accountStatus || 'Active'} />
               </div>
-              <div style={{ fontSize: 13, color: '#64748b', marginBottom: 4 }}>{profile?.email || '—'}</div>
+              <div style={{ fontSize: 13, color: '#64748b', marginBottom: 4 }}>{resolvedEmail || '—'}</div>
               <div style={{ fontSize: 12, color: '#94a3b8', fontFamily: 'monospace' }}>uid: {userId}</div>
-              <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 4 }}>Joined {fmtDate(profile?.createdAt)}</div>
+              <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 4 }}>Joined {fmtDate(resolvedCreatedAt)}</div>
             </div>
 
             {/* Action button */}
@@ -883,8 +992,9 @@ export default function UserProfilePage({ userId, onBack }) {
             <StatBox label="Trips Posted"      value={trips.length}             icon="🚗" accent="#0f766e" />
             <StatBox label="Trips Joined"      value={rideRequests.length}      icon="🎒" accent="#1d4ed8" />
             <StatBox label="Reports Received"  value={reports.length}           icon="⚑"  accent={reports.length > 0 ? '#dc2626' : '#64748b'} />
-            <StatBox label="Account Age"       value={accountAge(profile?.createdAt)} icon="📅" accent="#6c63ff" />
+            <StatBox label="Account Age"       value={accountAge(resolvedCreatedAt)} icon="📅" accent="#6c63ff" />
             <StatBox label="Moderation Events" value={auditLogs.length}         icon="📋" accent="#f59e0b" />
+            <StatBox label="Late Cancels"      value={profile?.lateCancelCount || 0} icon="⏱" accent={(profile?.lateCancelCount || 0) >= 3 ? '#dc2626' : (profile?.lateCancelCount || 0) >= 2 ? '#f59e0b' : '#64748b'} />
           </div>
         </div>
 
@@ -899,10 +1009,14 @@ export default function UserProfilePage({ userId, onBack }) {
         {activeTab === 'overview' && profile && (
           <OverviewTab
             profile={profile}
+            resolvedEmail={resolvedEmail}
+            resolvedCreatedAt={resolvedCreatedAt}
             onSuspend={() => setShowModal(true)}
             onUnsuspend={handleUnsuspend}
             suspending={suspending}
             unsuspending={unsuspending}
+            onClearFlag={handleClearFlag}
+            clearingFlag={clearingFlag}
           />
         )}
         {activeTab === 'reports' && (

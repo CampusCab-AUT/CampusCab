@@ -5,8 +5,19 @@ import TripReportsDashboard from './trip-reports/TripReportsDashboard';
 import AllUsersPage from './admin/AllUsersPage';
 import UserProfilePage from './admin/UserProfilePage';
 import AuditLogPage from './admin/AuditLogPage';
+import AdminHomePage from './admin/AdminHomePage';
 
 const NAV_ITEMS = [
+  {
+    id: 'home',
+    label: 'Overview',
+    icon: (
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
+        <rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>
+      </svg>
+    ),
+  },
   {
     id: 'all-users',
     label: 'All Users',
@@ -55,7 +66,7 @@ const NAV_ITEMS = [
 ];
 
 export default function AdminDashboard({ onLogout }) {
-  const [activePage, setActivePage] = useState('all-users');
+  const [activePage, setActivePage] = useState('home');
   // selectedUser carries { userId, userName, source: 'reported' | 'all-users' }
   const [selectedUser, setSelectedUser] = useState(null);
 
@@ -65,6 +76,11 @@ export default function AdminDashboard({ onLogout }) {
 
   const handleBackToDashboard = () => {
     setSelectedUser(null);
+  };
+
+  const handleNavigate = (pageId) => {
+    setSelectedUser(null);
+    setActivePage(pageId);
   };
 
   const renderContent = () => {
@@ -111,6 +127,10 @@ export default function AdminDashboard({ onLogout }) {
 
     if (activePage === 'audit-log') {
       return <AuditLogPage />;
+    }
+
+    if (activePage === 'home') {
+      return <AdminHomePage onNavigate={handleNavigate} />;
     }
 
     return null;

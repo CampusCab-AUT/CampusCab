@@ -1,14 +1,57 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { doc, onSnapshot, updateDoc, collection, query, where, getDoc } from 'firebase/firestore';
 import { db, firebaseReady } from '../firebase';
 import { FIRESTORE_COLLECTIONS, TRIP_STATUS, RIDE_REQUEST_STATUS } from '../firestoreModel';
-import { RouteMap } from './MapComponents';
+import { RouteMap, LiveRouteMap } from './MapComponents';
+import * as turf from '@turf/turf';
 
 export default function DriverTripView({ tripId, onBackToDashboard }) {
   const [tripState, setTripState] = useState('not_started'); // 'not_started' | 'in_progress' | 'completed'
   const [tripData, setTripData] = useState(null);
   const [approvedPassengers, setApprovedPassengers] = useState([]);
   const [driverLocation, setDriverLocation] = useState(null);
+
+  const isDemo = !firebaseReady || !tripId || tripId === 'demo';
+
+  const lastSyncTimeRef = useRef(0);
+  const lastSyncLocRef = useRef(null);
+
+  // Sync driver location to Firestore when in progress
+  useEffect(() => {
+    if (isDemo || tripState !== 'in_progress' || !tripId || !driverLocation) return;
+
+    const now = Date.now();
+    const timeElapsed = now - lastSyncTimeRef.current;
+    
+    let shouldSync = false;
+    if (!lastSyncLocRef.current) {
+      shouldSync = true;
+    } else {
+      const dist = turf.distance(
+        turf.point([lastSyncLocRef.current.lon, lastSyncLocRef.current.lat]),
+        turf.point([driverLocation.lon, driverLocation.lat]),
+        { units: 'meters' }
+      );
+      // Sync if moved more than 10 meters, or if 10 seconds elapsed and moved at least 2 meters
+      if (dist > 10 || (timeElapsed > 10000 && dist > 2)) {
+        shouldSync = true;
+      }
+    }
+
+    // Rate-limit sync to once every 5 seconds minimum
+    if (shouldSync && timeElapsed >= 5000) {
+      lastSyncTimeRef.current = now;
+      lastSyncLocRef.current = driverLocation;
+
+      const tripRef = doc(db, FIRESTORE_COLLECTIONS.trips, tripId);
+      updateDoc(tripRef, {
+        driverLocation: driverLocation,
+        locationUpdatedAt: new Date().toISOString()
+      }).catch(err => {
+        console.error("Error updating driver location in Firestore:", err);
+      });
+    }
+  }, [driverLocation, tripState, tripId, isDemo]);
 
   // Geolocation tracking
   useEffect(() => {
@@ -37,8 +80,6 @@ export default function DriverTripView({ tripId, onBackToDashboard }) {
 
     return () => navigator.geolocation.clearWatch(watchId);
   }, []);
-
-  const isDemo = !firebaseReady || !tripId || tripId === 'demo';
 
   // Listen to trip status
   useEffect(() => {
@@ -297,12 +338,22 @@ export default function DriverTripView({ tripId, onBackToDashboard }) {
 
       {/* Map Section */}
       <div className="relative w-full h-[460px] bg-slate-900 flex-shrink-0 z-10 overflow-hidden">
-        <RouteMap 
-          origin={routeOrigin} 
-          destination={routeDestination} 
-          height="100%" 
-          style={{ border: 'none', borderRadius: 0 }}
-        />
+        {tripState === 'in_progress' ? (
+          <LiveRouteMap
+            origin={originLoc}
+            destination={destLoc}
+            currentLocation={driverLocation}
+            height="100%"
+            style={{ border: 'none', borderRadius: 0 }}
+          />
+        ) : (
+          <RouteMap 
+            origin={routeOrigin} 
+            destination={routeDestination} 
+            height="100%" 
+            style={{ border: 'none', borderRadius: 0 }}
+          />
+        )}
 
         {/* Minimal Directions overlay */}
         <div className="absolute top-24 left-6 right-6 p-4 bg-slate-950/85 backdrop-blur-lg rounded-2xl border border-slate-800 shadow-lg flex items-center gap-4 transition-all duration-300 z-[1000]">

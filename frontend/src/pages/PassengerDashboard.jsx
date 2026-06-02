@@ -32,6 +32,7 @@ import LeaveRatingModal from '../components/LeaveRatingModal';
 import ReportUserModal from '../components/ReportUserModal';
 import ChatWindow from '../components/ChatWindow';
 import { canViewChat } from '../utils/chatPermissions';
+import PassengerLiveTracking from '../components/PassengerLiveTracking';
 
 function formatDeparture(departureTime) {
   if (!departureTime) return 'Departure time unavailable';
@@ -67,6 +68,7 @@ function PassengerDashboard() {
   const [safetyActionState, setSafetyActionState] = useState({});
   const [view, setView] = useState('rides'); // 'rides' | 'alerts'
   const [activeAlertCount, setActiveAlertCount] = useState(0);
+  const [trackingRide, setTrackingRide] = useState(null);
 
   useEffect(() => {
     if (!firebaseReady || !auth?.currentUser || !db) return undefined;
@@ -415,6 +417,23 @@ function PassengerDashboard() {
     setMessage('');
 
     try {
+      // Check for late cancellation (< 30 min before departure)
+      const THIRTY_MIN_MS = 30 * 60 * 1000;
+      const STRIKE_THRESHOLD = 3;
+      const departureTime = rideToCancel.trip?.departureTime;
+      const departureMs = departureTime ? new Date(departureTime).getTime() : null;
+      const isLateCancel = departureMs !== null && (departureMs - Date.now()) < THIRTY_MIN_MS;
+
+      let lateCancelUpdate = null;
+      if (isLateCancel) {
+        const userSnap = await getDoc(doc(db, FIRESTORE_COLLECTIONS.users, user.uid));
+        if (userSnap.exists()) {
+          const newCount = (userSnap.data().lateCancelCount || 0) + 1;
+          lateCancelUpdate = { lateCancelCount: newCount };
+          if (newCount >= STRIKE_THRESHOLD) lateCancelUpdate.flaggedForLateCancellations = true;
+        }
+      }
+
       const batch = writeBatch(db);
       const requestRef = doc(db, FIRESTORE_COLLECTIONS.rideRequests, rideToCancel.id);
       const notificationRef = doc(collection(db, FIRESTORE_COLLECTIONS.notifications));
@@ -426,6 +445,10 @@ function PassengerDashboard() {
         status: RIDE_REQUEST_STATUS.cancelled,
         cancelledAt: serverTimestamp(),
       });
+
+      if (lateCancelUpdate) {
+        batch.update(doc(db, FIRESTORE_COLLECTIONS.users, user.uid), lateCancelUpdate);
+      }
 
       if (driverId) {
         batch.set(notificationRef, {
@@ -574,6 +597,27 @@ function PassengerDashboard() {
           {tabStrip}
         </header>
         <MyAlerts onGoToSearch={() => setView('rides')} />
+      </div>
+    );
+  }
+
+  if (trackingRide) {
+    const tripForRide = associatedTrips[trackingRide.tripId] || trackingRide.trip;
+    return (
+      <div style={{ padding: '20px' }}>
+        <PassengerLiveTracking
+          ride={trackingRide}
+          trip={tripForRide}
+          onBack={() => setTrackingRide(null)}
+          onOpenChat={() => setChatModalRide(trackingRide)}
+        />
+        {chatModalRide && (
+          <ChatWindow
+            rideRequest={chatModalRide}
+            currentUser={auth.currentUser}
+            onClose={() => setChatModalRide(null)}
+          />
+        )}
       </div>
     );
   }
@@ -884,6 +928,24 @@ function PassengerDashboard() {
                               }}
                             >
                               Chat with Driver
+                            </button>
+                          )}
+
+                          {ride.status === RIDE_REQUEST_STATUS.approved && (
+                            <button
+                              type="button"
+                              onClick={() => setTrackingRide(ride)}
+                              style={{
+                                border: '1px solid #0f766e',
+                                borderRadius: '8px',
+                                backgroundColor: '#0f766e',
+                                color: '#fff',
+                                cursor: 'pointer',
+                                fontWeight: 700,
+                                padding: '9px 12px',
+                              }}
+                            >
+                              Track Driver
                             </button>
                           )}
                         </div>
